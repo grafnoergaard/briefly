@@ -129,6 +129,7 @@ export async function runLifeOsAssistantTurn(params: {
     ]);
   const dateContext = getCurrentDateContext();
   const isVoiceChannel = params.channel === "voice";
+  const customGuidance = settings.customGuidance.trim();
 
   const selectedCalendars = calendarChoices.filter((calendar) => calendar.isSelected);
   const defaultCalendar =
@@ -142,7 +143,7 @@ export async function runLifeOsAssistantTurn(params: {
     : "The newest user message is a standalone request unless recent conversation clearly changes its meaning.";
 
   const prompt = [
-    `Current timestamp: ${new Date().toISOString()}.`,
+    `Current local timestamp in Europe/Copenhagen: ${dateContext.fullDateLabel}, kl. ${formatAppTime(new Date())}.`,
     "Timezone: Europe/Copenhagen.",
     `Current ISO week: Week ${dateContext.isoWeek} (${dateContext.isoWeekYear}), from ${dateContext.weekStartIso} to ${dateContext.weekEndIso}.`,
     `Weekend status: ${dateContext.isWeekend ? "It is currently weekend." : "It is currently a weekday."}`,
@@ -189,6 +190,7 @@ export async function runLifeOsAssistantTurn(params: {
             .join(", ")
         : "none"
     }.`,
+    `Extra Briefly principles: ${customGuidance || "none"}.`,
     `Recent conversation:\n${recentConversation}`,
     followUpHint,
     `User message: ${params.message}`,
@@ -200,6 +202,7 @@ export async function runLifeOsAssistantTurn(params: {
     calendarEvents,
     tasks,
     familyWorkspace,
+    customGuidance,
   });
 
   if (dayBrief) {
@@ -265,8 +268,8 @@ export async function runLifeOsAssistantTurn(params: {
         location: step.location,
       });
 
-      const startDate = new Date(createdEvent.startsAt);
-      const endDate = new Date(createdEvent.endsAt);
+      const startDate = toAppTimeZoneDate(createdEvent.startsAt);
+      const endDate = toAppTimeZoneDate(createdEvent.endsAt);
       const timeLabel = step.isAllDay
         ? format(startDate, "EEE d MMM")
         : `${format(startDate, "EEE d MMM HH.mm")}–${format(endDate, "HH.mm")}`;
@@ -571,6 +574,7 @@ async function answerRelativeDayBrief(params: {
     mealPlans: FamilyMealPlanEntry[];
     shoppingItems: ShoppingListEntry[];
   };
+  customGuidance: string;
 }) {
   const target = resolveRelativeDayBriefTarget(params.message);
 
@@ -645,7 +649,8 @@ async function answerRelativeDayBrief(params: {
             .join(", ")
         : "indkøbene er under kontrol"
     }.`,
-    "Skriv 3 til 4 sætninger som en rolig, brugbar briefing. Nævn konkrete aftaler ved navn. Giv kontekst, ikke bare en opremsning. Fortæl hvad der er vigtigst at være opmærksom på, om noget overlapper, og om middag eller indkøb kræver handling. Undgå årstal, undgå tidszoner, undgå parenteser og undgå stive formuleringer. Det skal lyde som et menneske, ikke som et system.",
+    `Ekstra Briefly-principper: ${params.customGuidance || "ingen ekstra principper"}.`,
+    "Skriv 3 til 4 sætninger som en rolig, brugbar briefing. Nævn konkrete aftaler ved navn. Giv kontekst, ikke bare en opremsning. Fortæl hvad der er vigtigst at være opmærksom på, om noget overlapper, og om middag eller indkøb kræver handling. Hvis der ikke er planlagt middag, skal det behandles som et fokuspunkt og ikke som neutral status, fordi det ofte betyder at aftensplan og muligvis også indkøb ikke er helt på plads. Undgå årstal, undgå tidszoner, undgå parenteser og undgå stive formuleringer. Det skal lyde som et menneske, ikke som et system.",
   ].join(" ");
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -658,7 +663,7 @@ async function answerRelativeDayBrief(params: {
       model: params.model,
       reasoning: { effort: "low" },
       instructions:
-        "Du er Briefly. Skriv en kort, varm og brugbar dansk briefing for den ønskede dag. Den skal føles som en lille menneskelig oversigt, ikke som en tør kalenderliste.",
+        "Du er Briefly. Skriv en kort, varm og brugbar dansk briefing for den ønskede dag. Den skal føles som en lille menneskelig oversigt, ikke som en tør kalenderliste. Manglende middag er et reelt opmærksomhedspunkt og må ikke behandles som om alt er under kontrol.",
       input: dayPrompt,
     }),
     signal: AbortSignal.timeout(10000),
@@ -781,10 +786,12 @@ function buildFallbackDayBrief(params: {
     : "";
   const mealLine = params.targetMeal
     ? `Middagen er ${params.targetMeal.title}.`
-    : "";
+    : "Der er endnu ikke planlagt middag, så det er værd at få styr på aftensmaden.";
   const shoppingLine = params.openShoppingItems.length > 0
     ? `Indkøbslisten er stadig åben med blandt andet ${params.openShoppingItems.slice(0, 2).map((item) => item.label).join(" og ")}.`
-    : "";
+    : params.targetMeal
+      ? ""
+      : "Indkøbene ser rolige ud, men når middagen ikke er planlagt endnu, er det værd at holde øje med om der også mangler indkøb.";
 
   return [
     `${params.targetLabel === "i morgen" ? "I morgen" : "I dag"} starter med ${firstEvent.title}${firstEvent.isAllDay ? "" : ` kl. ${formatAppTime(firstEvent.startsAt)}`}.`,

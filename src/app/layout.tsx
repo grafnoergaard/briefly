@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Manrope } from "next/font/google";
 
+import { BrieflyBootSplash } from "@/components/briefly-boot-splash";
 import "./globals.css";
 
 const sans = Manrope({
@@ -23,7 +24,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
     title: "Briefly",
   },
   icons: {
@@ -38,6 +39,11 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  themeColor: "#101313",
+  colorScheme: "dark",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -49,8 +55,13 @@ export default function RootLayout({
       className={`${sans.variable} ${mono.variable} h-full scroll-smooth`}
       data-scroll-behavior="smooth"
       suppressHydrationWarning
+      style={{ backgroundColor: "#101313", color: "#ffffff" }}
     >
-      <body className="min-h-full bg-background text-foreground antialiased">
+      <body
+        className="min-h-full bg-background text-foreground antialiased"
+        style={{ backgroundColor: "#101313", color: "#ffffff" }}
+      >
+        <BrieflyBootSplash />
         {children}
       </body>
     </html>

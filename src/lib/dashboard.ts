@@ -1,5 +1,4 @@
-import { format } from "date-fns";
-
+import { getCurrentDateContext } from "@/lib/date-context";
 import { ensureShoppingListsForFamilyGroup, isLegacyShoppingListId } from "@/lib/family";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { DashboardSnapshot, IntegrationConnection } from "@/lib/types";
@@ -18,6 +17,7 @@ const emptySnapshot: DashboardSnapshot = {
 
 export async function getDashboardSnapshot(userId: string): Promise<DashboardSnapshot> {
   const supabase = await createSupabaseServerClient();
+  const dateContext = getCurrentDateContext();
 
   if (!supabase) {
     return emptySnapshot;
@@ -48,7 +48,7 @@ export async function getDashboardSnapshot(userId: string): Promise<DashboardSna
     supabase
       .from("meal_plans")
       .select("title, planned_for")
-      .gte("planned_for", format(new Date(), "yyyy-MM-dd"))
+      .gte("planned_for", dateContext.todayIso)
       .order("planned_for", { ascending: true })
       .limit(1)
       .maybeSingle(),

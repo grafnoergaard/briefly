@@ -39,7 +39,7 @@ export function AppFrame({ children, currentPath, userLabel }: AppFrameProps) {
         <main className="flex-1">{children}</main>
 
         <nav className="fixed inset-x-0 bottom-0 z-30 w-full px-2 pb-[max(0.8rem,env(safe-area-inset-bottom))] xl:hidden sm:px-3 sm:pb-[max(0.95rem,env(safe-area-inset-bottom))]">
-          <div className="mx-auto w-full max-w-3xl rounded-[30px] border border-black/5 bg-[#101313]/98 px-2 pt-2 text-white shadow-[0_24px_80px_-24px_rgba(0,0,0,0.6)] backdrop-blur sm:px-3">
+          <div className="mx-auto w-full max-w-3xl rounded-[30px] border border-black/5 bg-[#101313]/98 p-1.5 text-white shadow-[0_24px_80px_-24px_rgba(0,0,0,0.6)] backdrop-blur sm:p-2">
             <div
               className="grid gap-1"
               style={{ gridTemplateColumns: `repeat(${primaryNavigationItems.length + 1}, minmax(0, 1fr))` }}
@@ -53,12 +53,14 @@ export function AppFrame({ children, currentPath, userLabel }: AppFrameProps) {
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      "flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-[20px] px-2 py-2 text-[10px] font-medium transition-colors sm:px-3 sm:text-[11px]",
-                      isActive ? "bg-white text-[#101313]" : "text-white/70 hover:text-white",
+                      "flex h-[68px] flex-col items-center justify-center gap-1.5 rounded-[22px] px-2 py-0 text-[10px] font-medium leading-none transition-colors sm:px-3 sm:text-[11px]",
+                      isActive
+                        ? "bg-white text-[#101313] shadow-[0_12px_30px_-18px_rgba(255,255,255,0.9)]"
+                        : "text-white/70 hover:text-white",
                     )}
                   >
-                    <Icon className="size-4" />
-                    <span>{item.label}</span>
+                    <Icon className="size-4 shrink-0" />
+                    <span className="leading-none">{item.label}</span>
                   </Link>
                 );
               })}

@@ -1,16 +1,28 @@
 type BrieflyLoadingScreenProps = {
   label?: string;
   detail?: string;
+  splash?: boolean;
 };
 
 export function BrieflyLoadingScreen({
   label = "Briefly",
   detail = "Henter dagens briefing, kalender og familiens overblik.",
+  splash = false,
 }: BrieflyLoadingScreenProps) {
   return (
     <section className="min-h-screen bg-[#101313] text-white">
-      <div className="mx-auto flex min-h-screen w-full max-w-5xl items-center justify-center px-6 py-16">
-        <div className="w-full max-w-3xl rounded-[36px] border border-white/10 bg-white/[0.03] p-8 shadow-[0_30px_120px_-60px_rgba(0,0,0,0.85)] sm:p-10">
+      <div
+        className={`mx-auto flex min-h-screen w-full items-center justify-center px-6 py-16 ${
+          splash ? "max-w-none" : "max-w-5xl"
+        }`}
+      >
+        <div
+          className={`w-full ${
+            splash
+              ? "max-w-4xl rounded-none border-0 bg-transparent p-0 shadow-none"
+              : "max-w-3xl rounded-[36px] border border-white/10 bg-white/[0.03] p-8 shadow-[0_30px_120px_-60px_rgba(0,0,0,0.85)] sm:p-10"
+          }`}
+        >
           <div className="flex flex-col gap-8">
             <div className="flex items-center gap-4">
               <div className="relative flex h-16 w-16 items-center justify-center">

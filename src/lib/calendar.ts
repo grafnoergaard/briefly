@@ -2,6 +2,9 @@ import { addDays, format } from "date-fns";
 import { da } from "date-fns/locale";
 
 import {
+  getAppEndOfDayIso,
+  getAppStartOfDayIso,
+  getCurrentDateContext,
   formatAppTime,
   isTodayInAppTimeZone,
   toAppTimeZoneDate,
@@ -32,9 +35,9 @@ export async function getUpcomingCalendarEvents(
     return [];
   }
 
-  const today = new Date();
-  const windowStart = format(today, "yyyy-MM-dd'T'00:00:00xxx");
-  const windowEnd = format(addDays(today, daysAhead), "yyyy-MM-dd'T'23:59:59xxx");
+  const dateContext = getCurrentDateContext();
+  const windowStart = getAppStartOfDayIso(dateContext.today);
+  const windowEnd = getAppEndOfDayIso(addDays(dateContext.today, daysAhead));
 
   const { data, error } = await supabase
     .from("calendar_events_cache")

@@ -102,6 +102,14 @@ export function formatAppTime(input: Date | string) {
   return `${parts.hour}.${parts.minute}`;
 }
 
+export function getAppStartOfDayIso(input: Date | string = new Date()) {
+  return normalizeToAppTimeZoneIsoDateTime(`${getAppDateKey(input)}T00:00:00`);
+}
+
+export function getAppEndOfDayIso(input: Date | string = new Date()) {
+  return normalizeToAppTimeZoneIsoDateTime(`${getAppDateKey(input)}T23:59:59`);
+}
+
 export function isTodayInAppTimeZone(input: Date | string, now = new Date()) {
   return getAppDateKey(input) === getAppDateKey(now);
 }

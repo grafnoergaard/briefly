@@ -36,12 +36,14 @@ export function MoreMenu({ currentPath, compact = false }: MoreMenuProps) {
           <button
             type="button"
             className={cn(
-              "flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-[20px] px-2 py-2 text-[10px] font-medium transition-colors sm:px-3 sm:text-[11px]",
-              isActive ? "bg-white text-[#101313]" : "text-white/70 hover:text-white",
+              "flex h-[68px] flex-col items-center justify-center gap-1.5 rounded-[22px] px-2 py-0 text-[10px] font-medium leading-none transition-colors sm:px-3 sm:text-[11px]",
+              isActive
+                ? "bg-white text-[#101313] shadow-[0_12px_30px_-18px_rgba(255,255,255,0.9)]"
+                : "text-white/70 hover:text-white",
             )}
           >
-            <Menu className="size-4" />
-            <span>Mere</span>
+            <Menu className="size-4 shrink-0" />
+            <span className="leading-none">Mere</span>
           </button>
         ) : (
           <Button

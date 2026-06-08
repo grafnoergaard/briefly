@@ -1,15 +1,15 @@
 import { createHash } from "node:crypto";
-import { format, parseISO, startOfDay } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { da } from "date-fns/locale";
 
-import { formatAppTime } from "@/lib/date-context";
+import { formatAppTime, getAppStartOfDayIso, getCurrentDateContext } from "@/lib/date-context";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { HomeBriefingAiInput, HomeBriefingAiSection, HomeBriefingModel } from "@/lib/types";
 import type { AiBriefSettings } from "@/lib/ai-settings";
 
-const AI_BRIEF_SOURCE_VERSION = "home_brief_v8";
+const AI_BRIEF_SOURCE_VERSION = "home_brief_v9";
 const AI_BRIEF_INSTRUCTIONS =
-  "Skriv en sammenhængende Life OS-briefing på dansk som ét samlet afsnit på 4 til 5 sætninger. Life OS er en rolig, intelligent hverdagsbriefing, ikke et produktivitetsdashboard. Gå direkte til det vigtigste; ingen hilsen og ingen overskrift som 'lige nu' eller 'i dag'. Briefingen skal være familiebevidst og tydeligt skelne mellem personlige opgaver, familie-logistik og madplan/indkøb, men uden at lyde mekanisk. Nævn de konkrete kalenderaftaler ved navn i konteksten; det er ikke nok at skrive hvor mange aftaler der er. Hvis to aftaler overlapper, skal det siges tydeligt. Brug den første del af briefingen på dagens tidskritiske kalender og eventuelle overlap. Brug derefter opgaver, men kun hvis der er reelt relevante åbne ting, især dem der forfalder i dag eller er forsinkede. Aftensmad skal beskrives som aktuel kontekst; undgå unødvendige datoer på dagens middag. Afslut med indkøb og sig tydeligt, hvis listen er under kontrol. Briefingen skal reducere mental belastning og skabe ro, nærvær og overskud. Vær dato- og ugebevidst: respekter den aktuelle ISO-uge, nævn weekend hvis det er relevant, og behandl aldrig gamle planer eller gammel familieaktivitet som aktuelle. Ignorér måltider, aftaler eller familieopdateringer der ligger i fortiden, medmindre de stadig har åbne konsekvenser i dag. Brug konkrete detaljer fra kalender, lister, madplan og indkøb når de findes. Behandl lister som en enkel to-do-liste, ikke som et dramatisk prioriteringssystem. Skriv roligt, præcist og praktisk med ægte menneskeligt dansk. Undgå stive formuleringer som 'dagens vigtigste tid er' eller 'klokken 20.10:'. Undgå parenteser omkring tidspunkter eller metadata. Nævn kun klokkeslæt, når de hjælper læseren. Brug ikke markdown, punktlister, overskrifter eller labels.";
+  "Skriv en sammenhængende Life OS-briefing på dansk som ét samlet afsnit på 4 til 5 sætninger. Life OS er en rolig, intelligent hverdagsbriefing, ikke et produktivitetsdashboard. Gå direkte til det vigtigste; ingen hilsen og ingen overskrift som 'lige nu' eller 'i dag'. Briefingen skal være familiebevidst og tydeligt skelne mellem personlige opgaver, familie-logistik og madplan/indkøb, men uden at lyde mekanisk. Nævn de konkrete kalenderaftaler ved navn i konteksten; det er ikke nok at skrive hvor mange aftaler der er. Hvis to aftaler overlapper, skal det siges tydeligt. Brug den første del af briefingen på dagens tidskritiske kalender og eventuelle overlap. Brug derefter opgaver, men kun hvis der er reelt relevante åbne ting, især dem der forfalder i dag eller er forsinkede. Aftensmad skal beskrives som aktuel kontekst; undgå unødvendige datoer på dagens middag. Hvis der ikke er planlagt middag, er det ikke neutral information: behandl det som et opmærksomhedspunkt, fordi det ofte betyder at aftensplan og måske også indkøb ikke er helt på plads endnu. Afslut med indkøb og sig tydeligt, hvis listen er under kontrol. Briefingen skal reducere mental belastning og skabe ro, nærvær og overskud. Vær dato- og ugebevidst: respekter den aktuelle ISO-uge, nævn weekend hvis det er relevant, og behandl aldrig gamle planer eller gammel familieaktivitet som aktuelle. Ignorér måltider, aftaler eller familieopdateringer der ligger i fortiden, medmindre de stadig har åbne konsekvenser i dag. Brug konkrete detaljer fra kalender, lister, madplan og indkøb når de findes. Behandl lister som en enkel to-do-liste, ikke som et dramatisk prioriteringssystem. Skriv roligt, præcist og praktisk med ægte menneskeligt dansk. Undgå stive formuleringer som 'dagens vigtigste tid er' eller 'klokken 20.10:'. Undgå parenteser omkring tidspunkter eller metadata. Nævn kun klokkeslæt, når de hjælper læseren. Brug ikke markdown, punktlister, overskrifter eller labels.";
 
 type ResolveAiBriefSummaryInput = {
   userId: string;
@@ -70,7 +70,7 @@ export async function resolveAiBriefSummary({
     };
   }
 
-  const dayStart = startOfDay(new Date()).toISOString();
+  const dayStart = getAppStartOfDayIso();
   const { data: cachedBrief } = await supabase
     .from("ai_briefings")
     .select("summary, model, generated_at")
@@ -118,7 +118,7 @@ export async function resolveAiBriefSummary({
         tone: settings.tone,
         promptHash,
         input: aiInput,
-        generatedFor: format(new Date(), "yyyy-MM-dd"),
+        generatedFor: getCurrentDateContext().todayIso,
       },
     });
 
@@ -266,6 +266,7 @@ function buildPromptText(input: HomeBriefingAiInput, tone: string) {
   const familyFeed = input.familyFeed.length
     ? input.familyFeed.map((item) => `${item.summary} (${item.entityType})`).join(", ")
     : "ingen";
+  const customGuidance = input.customGuidance?.trim() || "ingen ekstra Briefly-principper";
 
   return [
     `Tone: ${tone}.`,
@@ -285,6 +286,7 @@ function buildPromptText(input: HomeBriefingAiInput, tone: string) {
     `Seneste familieaktivitet kun for den aktuelle uge: ${familyFeed}.`,
     `Dagens form: ${input.dayShape}.`,
     `Integrationsstatus: ${input.integrationStatus}.`,
+    `Ekstra Briefly-principper: ${customGuidance}.`,
     "Skriv en aktuel briefing, ikke en ren morgenbriefing.",
     "Hold rækkefølgen stram: 1) dagens konkrete kalender og det vigtigste tidspunkt, 2) eventuelle overlap eller familie-logistik, 3) relevante personlige eller fælles opgaver, 4) aftensmad, 5) manglende indkøb.",
     "Brug de faktiske aftalenavne, faktiske tidspunkter, faktiske opgavetitler, den aktuelle middag og de faktiske manglende indkøbsvarer, når de findes.",

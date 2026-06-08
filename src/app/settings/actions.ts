@@ -31,6 +31,7 @@ export async function saveAiSettingsAction(formData: FormData) {
   const voiceStyle =
     String(formData.get("voiceStyle") ?? "").trim() ||
     "Varm, rolig, moderne og tydelig dansk stemme med naturlige pauser.";
+  const customGuidance = String(formData.get("customGuidance") ?? "").trim();
 
   const { error } = await supabase
     .from("profiles")
@@ -41,6 +42,7 @@ export async function saveAiSettingsAction(formData: FormData) {
       ai_voice_name: voice,
       ai_voice_speed: voiceSpeed,
       ai_voice_style: voiceStyle,
+      ai_custom_guidance: customGuidance,
     })
     .eq("id", user.id);
 

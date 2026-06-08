@@ -154,6 +154,7 @@ export type HomeBriefingAiInput = {
     entityType: string;
     createdAt: string;
   }>;
+  customGuidance?: string;
   integrationStatus: string;
   dayShape: string;
 };

@@ -2,12 +2,17 @@ import {
   format,
   formatDistanceToNowStrict,
   isBefore,
-  isToday,
-  isTomorrow,
 } from "date-fns";
 import { da } from "date-fns/locale";
 
-import { getAppDateKey, getCurrentDateContext } from "@/lib/date-context";
+import {
+  formatAppTime,
+  getAppDateKey,
+  getCurrentDateContext,
+  isTodayInAppTimeZone,
+  isTomorrowInAppTimeZone,
+  toAppTimeZoneDate,
+} from "@/lib/date-context";
 import { ensureShoppingListsForFamilyGroup, isLegacyShoppingListId } from "@/lib/family";
 import { formatEventTime, type CachedCalendarEvent } from "@/lib/calendar";
 import type { AiBriefSettings } from "@/lib/ai-settings";
@@ -161,6 +166,7 @@ export async function buildHomeBriefingModel({
   const integrationStatus = buildIntegrationStatus(snapshot);
   const aiInput = buildAiInput({
     snapshot,
+    aiSettings,
     dateContext,
     todayEvents,
     overlappingEvents,
@@ -194,6 +200,7 @@ export async function buildHomeBriefingModel({
 
 function buildAiInput({
   snapshot,
+  aiSettings,
   dateContext,
   todayEvents,
   overlappingEvents,
@@ -206,6 +213,7 @@ function buildAiInput({
   integrationStatus,
 }: {
   snapshot: DashboardSnapshot;
+  aiSettings: AiBriefSettings;
   dateContext: ReturnType<typeof getCurrentDateContext>;
   todayEvents: CachedCalendarEvent[];
   overlappingEvents: ReturnType<typeof findOverlappingEvents>;
@@ -226,7 +234,7 @@ function buildAiInput({
   return {
     dateLabel: dateContext.fullDateLabel,
     familyGroupName: snapshot.familyGroupName,
-    currentTimeLabel: format(new Date(), "HH.mm"),
+    currentTimeLabel: formatAppTime(new Date()),
     todayEvents: todayEvents.map((event) => ({
       title: event.title,
       startsAt: event.startsAt,
@@ -296,6 +304,7 @@ function buildAiInput({
       entityType: row.entity_type,
       createdAt: row.created_at,
     })),
+    customGuidance: aiSettings.customGuidance,
     integrationStatus,
     dayShape,
   };
@@ -320,7 +329,7 @@ function buildSummary({
   const overlapText = buildOverlapSummary(todayEvents);
   const namedEventsText = buildNamedTodayEventsSummary(todayEvents);
   const { personalTasks, familyTasks } = splitTasks(topTasks, familyGroupName);
-  const isTodaysMeal = mealPlan ? mealPlan.planned_for === format(new Date(), "yyyy-MM-dd") : false;
+  const isTodaysMeal = mealPlan ? mealPlan.planned_for === getCurrentDateContext().todayIso : false;
 
   if (todayEvents.length > 0) {
     parts.push(namedEventsText);
@@ -382,7 +391,7 @@ function buildBriefingLines({
   const lines: BriefingLine[] = [];
   const overlapText = buildOverlapSummary(todayEvents);
   const { personalTasks, familyTasks } = splitTasks(topTasks, familyGroupName);
-  const isTodaysMeal = mealPlan ? mealPlan.planned_for === format(new Date(), "yyyy-MM-dd") : false;
+  const isTodaysMeal = mealPlan ? mealPlan.planned_for === getCurrentDateContext().todayIso : false;
 
   if (todayEvents.length > 0) {
     lines.push({
@@ -492,7 +501,7 @@ function buildFamilyFeed({
     fallback.push({
       id: "meal-fallback",
       summary:
-        mealPlan.planned_for === format(new Date(), "yyyy-MM-dd")
+        mealPlan.planned_for === getCurrentDateContext().todayIso
           ? `Aftensmaden er planlagt som ${mealPlan.title}.`
           : `Næste ret i madplanen er ${mealPlan.title}.`,
       meta: "Madplan",
@@ -623,34 +632,35 @@ function getTaskDueLabel(task: CachedTask) {
   }
 
   const dueDate = new Date(task.dueAt);
+  const now = new Date();
 
-  if (isBefore(dueDate, new Date())) {
+  if (isBefore(dueDate, now)) {
     return "er forsinket";
   }
 
-  if (isToday(dueDate)) {
+  if (isTodayInAppTimeZone(dueDate, now)) {
     return "forfalder i dag";
   }
 
-  if (isTomorrow(dueDate)) {
+  if (isTomorrowInAppTimeZone(dueDate, now)) {
     return "forfalder i morgen";
   }
 
-  return `forfalder ${format(dueDate, "EEE", { locale: da })}`;
+  return `forfalder ${format(toAppTimeZoneDate(dueDate), "EEE", { locale: da })}`;
 }
 
 function getDayLabel(value: string) {
   const date = new Date(value);
 
-  if (isToday(date)) {
+  if (isTodayInAppTimeZone(date)) {
     return "i dag";
   }
 
-  if (isTomorrow(date)) {
+  if (isTomorrowInAppTimeZone(date)) {
     return "i morgen";
   }
 
-  return format(date, "EEEE", { locale: da });
+  return format(toAppTimeZoneDate(date), "EEEE", { locale: da });
 }
 
 function buildNamedTodayEventsSummary(todayEvents: CachedCalendarEvent[]) {

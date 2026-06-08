@@ -220,6 +220,26 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
                 </div>
               </div>
 
+              <div className="rounded-[22px] border border-border/70 p-4">
+                <p className="text-sm font-semibold">Briefly-principper</p>
+                <p className="mt-2 text-sm leading-7 text-muted-foreground">
+                  Skriv regler eller præferencer, som Briefly skal huske fremover. Brug det til
+                  ting som tone, hvad der skal fremhæves, eller hvordan manglende madplan og
+                  indkøb skal tolkes.
+                </p>
+
+                <label className="mt-4 grid gap-2 text-sm">
+                  <span className="font-medium">Ekstra instruktioner til Briefly</span>
+                  <textarea
+                    name="customGuidance"
+                    defaultValue={settings.customGuidance}
+                    rows={5}
+                    placeholder="Fx: Hvis der ikke er planlagt middag, skal det altid behandles som noget, der kræver opmærksomhed. Hvis indkøb er tomme, men middag mangler, må Briefly gerne antyde at der muligvis ikke er styr på aftensmaden endnu."
+                    className="rounded-[22px] border border-border bg-background px-4 py-3 text-sm leading-7 outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
+                  />
+                </label>
+              </div>
+
               <div className="flex justify-end">
                 <button
                   type="submit"
