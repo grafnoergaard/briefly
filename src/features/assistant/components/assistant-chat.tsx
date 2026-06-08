@@ -63,6 +63,8 @@ type SpeechRecognitionLike = EventTarget & {
   stop: () => void;
 };
 
+const BRIEFLY_PLAYBACK_GAIN = 1.85;
+
 declare global {
   interface Window {
     SpeechRecognition?: new () => SpeechRecognitionLike;
@@ -105,6 +107,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
   const playbackUrlRef = useRef<string | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
 
   const canSubmit = draft.trim().length > 0 && !isPending;
   const visibleMessages =
@@ -219,6 +222,12 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
       await audioContextRef.current.resume();
     }
 
+    if (!gainNodeRef.current) {
+      gainNodeRef.current = audioContextRef.current.createGain();
+      gainNodeRef.current.gain.value = BRIEFLY_PLAYBACK_GAIN;
+      gainNodeRef.current.connect(audioContextRef.current.destination);
+    }
+
     return audioContextRef.current;
   }, []);
 
@@ -232,7 +241,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
     const buffer = context.createBuffer(1, 1, context.sampleRate);
     const source = context.createBufferSource();
     source.buffer = buffer;
-    source.connect(context.destination);
+    source.connect(gainNodeRef.current ?? context.destination);
     source.start(0);
   }, [ensureAudioContext]);
 
@@ -299,7 +308,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
             const source = context.createBufferSource();
             audioSourceRef.current = source;
             source.buffer = decoded;
-            source.connect(context.destination);
+            source.connect(gainNodeRef.current ?? context.destination);
             source.onended = () => {
               audioSourceRef.current = null;
               resolve();
@@ -319,6 +328,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
           const audio = new Audio(objectUrl);
           audio.preload = "auto";
           audio.setAttribute("playsinline", "true");
+          audio.volume = 1;
           playbackAudioRef.current = audio;
 
           await new Promise<void>((resolve, reject) => {
