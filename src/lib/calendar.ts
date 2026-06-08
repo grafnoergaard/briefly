@@ -1,5 +1,11 @@
-import { addDays, format, isSameDay } from "date-fns";
+import { addDays, format } from "date-fns";
+import { da } from "date-fns/locale";
 
+import {
+  formatAppTime,
+  isTodayInAppTimeZone,
+  toAppTimeZoneDate,
+} from "@/lib/date-context";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type CachedCalendarEvent = {
@@ -61,13 +67,13 @@ export async function getUpcomingCalendarEvents(
 }
 
 export function formatEventTime(event: CachedCalendarEvent) {
-  const start = new Date(event.startsAt);
-
   if (event.isAllDay) {
-    return isSameDay(start, new Date()) ? "Today" : format(start, "EEE dd MMM");
+    return isTodayInAppTimeZone(event.startsAt)
+      ? "I dag"
+      : format(toAppTimeZoneDate(event.startsAt), "EEE dd MMM", { locale: da });
   }
 
-  return format(start, "HH.mm");
+  return formatAppTime(event.startsAt);
 }
 
 export function formatCalendarEventDetail(event: CachedCalendarEvent) {
@@ -78,7 +84,7 @@ export function formatCalendarEventDetail(event: CachedCalendarEvent) {
   return (
     cleanedLocation ??
     cleanedDescription ??
-    (event.isAllDay ? "All day" : cleanedCalendarName ?? "Google Calendar")
+    (event.isAllDay ? "Hele dagen" : cleanedCalendarName ?? "Google Kalender")
   );
 }
 

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { format, parseISO, startOfDay } from "date-fns";
 import { da } from "date-fns/locale";
 
+import { formatAppTime } from "@/lib/date-context";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { HomeBriefingAiInput, HomeBriefingAiSection, HomeBriefingModel } from "@/lib/types";
 import type { AiBriefSettings } from "@/lib/ai-settings";
@@ -195,7 +196,7 @@ function buildPromptText(input: HomeBriefingAiInput, tone: string) {
   const todayEvents = input.todayEvents.length
     ? input.todayEvents
         .map((event) => {
-          const timeLabel = event.isAllDay ? "hele dagen" : format(parseISO(event.startsAt), "HH.mm");
+          const timeLabel = event.isAllDay ? "hele dagen" : formatAppTime(event.startsAt);
           const location = event.location ? `, ${event.location}` : "";
           const calendar = event.calendarName ? `, kalender: ${event.calendarName}` : "";
           return `${event.title} (${timeLabel}${location}${calendar})`;
@@ -206,7 +207,7 @@ function buildPromptText(input: HomeBriefingAiInput, tone: string) {
     ? input.overlappingEvents
         .map(
           (overlap) =>
-            `${overlap.firstTitle} kl. ${format(parseISO(overlap.firstStartsAt), "HH.mm")} overlapper med ${overlap.secondTitle} kl. ${format(parseISO(overlap.secondStartsAt), "HH.mm")}`,
+            `${overlap.firstTitle} kl. ${formatAppTime(overlap.firstStartsAt)} overlapper med ${overlap.secondTitle} kl. ${formatAppTime(overlap.secondStartsAt)}`,
         )
         .join(", ")
     : "ingen overlap";
@@ -240,7 +241,7 @@ function buildPromptText(input: HomeBriefingAiInput, tone: string) {
     : "ingen";
   const familyLogistics = input.familyLogistics.length
     ? input.familyLogistics
-        .map((event) => `${event.title}${event.isAllDay ? " hele dagen" : ` kl. ${format(parseISO(event.startsAt), "HH.mm")}`}`)
+        .map((event) => `${event.title}${event.isAllDay ? " hele dagen" : ` kl. ${formatAppTime(event.startsAt)}`}`)
         .join(", ")
     : "ingen";
   const shopping = input.openShoppingItems.length
@@ -298,7 +299,7 @@ function buildFallbackSections(input: HomeBriefingAiInput): HomeBriefingAiSectio
       key: "time",
       label: "Tidspunkt",
       text: input.todayEvents.length > 0
-        ? `I kalenderen i dag ligger ${input.todayEvents.map((event) => `${event.title} ${event.isAllDay ? "hele dagen" : `kl. ${format(parseISO(event.startsAt), "HH.mm")}`}`).join(", ")}.`
+        ? `I kalenderen i dag ligger ${input.todayEvents.map((event) => `${event.title} ${event.isAllDay ? "hele dagen" : `kl. ${formatAppTime(event.startsAt)}`}`).join(", ")}.`
         : "Der er ingen stor kalenderdeadline lige nu.",
     },
     {

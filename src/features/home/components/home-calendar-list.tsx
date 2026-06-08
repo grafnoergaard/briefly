@@ -2,16 +2,19 @@ import {
   format,
   getISOWeek,
   getISOWeekYear,
-  isToday,
-  isTomorrow,
-  isWeekend,
   endOfISOWeek,
-  parseISO,
   startOfISOWeek,
 } from "date-fns";
 import { da } from "date-fns/locale";
 
 import { Badge } from "@/components/ui/badge";
+import {
+  getAppDateKey,
+  isTodayInAppTimeZone,
+  isTomorrowInAppTimeZone,
+  isWeekendInAppTimeZone,
+  toAppTimeZoneDate,
+} from "@/lib/date-context";
 import { formatCalendarEventDetail, formatEventTime, type CachedCalendarEvent } from "@/lib/calendar";
 
 type HomeCalendarListProps = {
@@ -128,14 +131,14 @@ function groupEventsByWeek(events: CachedCalendarEvent[]): WeekGroup[] {
   const weekMap = new Map<string, WeekGroup>();
 
   for (const event of events) {
-    const eventDate = parseISO(event.startsAt);
+    const eventDate = toAppTimeZoneDate(event.startsAt);
     const weekStart = startOfISOWeek(eventDate);
     const weekKey = format(weekStart, "yyyy-MM-dd");
     const isoWeek = getISOWeek(weekStart);
     const isoWeekYear = getISOWeekYear(weekStart);
     const weekLabel = `Uge ${isoWeek} (${isoWeekYear})`;
     const subtitle = `${format(weekStart, "dd MMM", { locale: da })} - ${format(endOfISOWeek(weekStart), "dd MMM", { locale: da })}`;
-    const dayKey = format(eventDate, "yyyy-MM-dd");
+    const dayKey = getAppDateKey(event.startsAt);
 
     if (!weekMap.has(weekKey)) {
       weekMap.set(weekKey, {
@@ -158,9 +161,9 @@ function groupEventsByWeek(events: CachedCalendarEvent[]): WeekGroup[] {
       dayKey,
       dayLabel: format(eventDate, "EEEE", { locale: da }),
       dateLabel: format(eventDate, "dd MMM", { locale: da }),
-      isToday: isToday(eventDate),
-      isTomorrow: isTomorrow(eventDate),
-      isWeekend: isWeekend(eventDate),
+      isToday: isTodayInAppTimeZone(event.startsAt),
+      isTomorrow: isTomorrowInAppTimeZone(event.startsAt),
+      isWeekend: isWeekendInAppTimeZone(event.startsAt),
       events: [event],
     });
   }

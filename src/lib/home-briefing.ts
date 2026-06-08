@@ -7,7 +7,7 @@ import {
 } from "date-fns";
 import { da } from "date-fns/locale";
 
-import { getCurrentDateContext } from "@/lib/date-context";
+import { getAppDateKey, getCurrentDateContext } from "@/lib/date-context";
 import { ensureShoppingListsForFamilyGroup, isLegacyShoppingListId } from "@/lib/family";
 import { formatEventTime, type CachedCalendarEvent } from "@/lib/calendar";
 import type { AiBriefSettings } from "@/lib/ai-settings";
@@ -62,7 +62,9 @@ export async function buildHomeBriefingModel({
   const supabase = await createSupabaseServerClient();
   const dateContext = getCurrentDateContext();
   const today = dateContext.today;
-  const todayEvents = calendarEvents.filter((event) => isToday(new Date(event.startsAt)));
+  const todayEvents = calendarEvents.filter(
+    (event) => getAppDateKey(event.startsAt) === dateContext.todayIso,
+  );
   const overlappingEvents = findOverlappingEvents(todayEvents);
   const nextEvent = calendarEvents[0] ?? null;
 
