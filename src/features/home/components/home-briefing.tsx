@@ -1,4 +1,5 @@
 import { AssistantChat } from "@/features/assistant/components/assistant-chat";
+import { ReadBriefButton } from "@/features/home/components/read-brief-button";
 import type { HomeBriefingModel } from "@/lib/types";
 
 type HomeBriefingProps = {
@@ -24,6 +25,9 @@ export function HomeBriefing({ userName, briefing }: HomeBriefingProps) {
           <p className="max-w-4xl text-base leading-8 text-white/80 sm:text-lg">
             {briefing.summary}
           </p>
+          <div>
+            <ReadBriefButton summary={briefing.summary} />
+          </div>
         </div>
 
         <div className="border-t border-white/10 pt-6">

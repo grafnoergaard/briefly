@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { Loader2, Mic, MicOff, Sparkles, User2, Volume2, VolumeX } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,11 @@ declare global {
 }
 
 export function AssistantChat({ variant = "page" }: AssistantChatProps) {
+  const hasMounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: crypto.randomUUID(),
@@ -76,14 +81,23 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
   const handledRealtimeCallIdsRef = useRef<Set<string>>(new Set());
 
   const canSubmit = draft.trim().length > 0 && !isPending;
-  const visibleMessages = variant === "embedded" ? messages.slice(-2) : messages;
+  const visibleMessages =
+    variant === "embedded"
+      ? messages.length > 1
+        ? messages.slice(-2)
+        : []
+      : messages;
   const speechRecognitionSupported =
+    hasMounted &&
     typeof window !== "undefined" &&
     (typeof window.SpeechRecognition !== "undefined" ||
       typeof window.webkitSpeechRecognition !== "undefined");
   const speechSynthesisSupported =
-    typeof window !== "undefined" && typeof window.speechSynthesis !== "undefined";
+    hasMounted &&
+    typeof window !== "undefined" &&
+    typeof window.speechSynthesis !== "undefined";
   const realtimeVoiceSupported =
+    hasMounted &&
     typeof window !== "undefined" &&
     typeof window.RTCPeerConnection !== "undefined" &&
     typeof navigator !== "undefined" &&
@@ -747,18 +761,6 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
               : "space-y-4"
           }
         >
-          {variant === "embedded" ? (
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-white/45">
-                  Assistent
-                </p>
-                <h3 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-white">
-                  Skriv eller sig det næste
-                </h3>
-              </div>
-            </div>
-          ) : null}
           <div className="grid gap-3">
             {visibleMessages.map((message) => (
               <div
@@ -791,15 +793,11 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
                     {message.meta}
                   </p>
                 ) : null}
-                {message.role === "assistant" && !message.isError && message.meta !== "Arbejder" ? (
+                {variant === "page" && message.role === "assistant" && !message.isError && message.meta !== "Arbejder" ? (
                   <button
                     type="button"
                     onClick={() => speakText(message.content)}
-                    className={
-                      variant === "embedded"
-                        ? "mt-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-white/70 transition hover:bg-white/10"
-                        : "mt-3 inline-flex items-center gap-2 rounded-full border border-black/5 bg-white/60 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-foreground/70 transition hover:bg-white"
-                    }
+                    className="mt-3 inline-flex items-center gap-2 rounded-full border border-black/5 bg-white/60 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-foreground/70 transition hover:bg-white"
                   >
                     <Volume2 className="size-3.5" />
                     Læs højt
