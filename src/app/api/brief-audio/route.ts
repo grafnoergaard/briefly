@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -8,6 +10,15 @@ const requestSchema = z.object({
   text: z.string().trim().min(1).max(4096),
   mode: z.enum(["brief", "assistant"]).optional(),
 });
+
+const AUDIO_CACHE_TTL_MS = 1000 * 60 * 20;
+const audioCache = new Map<
+  string,
+  {
+    bytes: Uint8Array;
+    expiresAt: number;
+  }
+>();
 
 export async function POST(request: Request) {
   if (!process.env.OPENAI_API_KEY) {
@@ -61,6 +72,34 @@ export async function POST(request: Request) {
     parsedBody.data.mode === "assistant"
       ? "Læs som Brieflys direkte svar til brugeren. Hold det nærværende, naturligt og let at følge."
       : "Læs som Brieflys oplæsning af briefen. Hold det roligt, naturligt og let at følge.";
+  const cacheKey = createHash("sha256")
+    .update(
+      JSON.stringify({
+        userId: user.id,
+        mode: parsedBody.data.mode ?? "brief",
+        text: parsedBody.data.text,
+        voice: settings.voice,
+        voiceSpeed: settings.voiceSpeed,
+        voiceStyle: sharedVoiceInstructions,
+      }),
+    )
+    .digest("hex");
+  const cachedAudio = audioCache.get(cacheKey);
+
+  if (cachedAudio && cachedAudio.expiresAt > Date.now()) {
+    return new Response(cachedAudio.bytes.slice(), {
+      status: 200,
+      headers: {
+        "Content-Type": "audio/mpeg",
+        "Cache-Control": "private, max-age=1200",
+        "X-Briefly-Audio-Cache": "HIT",
+      },
+    });
+  }
+
+  if (cachedAudio) {
+    audioCache.delete(cacheKey);
+  }
 
   const response = await fetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
@@ -92,12 +131,19 @@ export async function POST(request: Request) {
   }
 
   const audioBuffer = await response.arrayBuffer();
+  const bytes = new Uint8Array(audioBuffer);
 
-  return new Response(audioBuffer, {
+  audioCache.set(cacheKey, {
+    bytes,
+    expiresAt: Date.now() + AUDIO_CACHE_TTL_MS,
+  });
+
+  return new Response(bytes.slice(), {
     status: 200,
     headers: {
       "Content-Type": "audio/mpeg",
-      "Cache-Control": "no-store",
+      "Cache-Control": "private, max-age=1200",
+      "X-Briefly-Audio-Cache": "MISS",
     },
   });
 }

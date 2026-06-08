@@ -10,6 +10,7 @@ type ReadBriefButtonProps = {
 };
 
 const BRIEFLY_PLAYBACK_GAIN = 1.85;
+const prefetchedBriefAudio = new Map<string, ArrayBuffer>();
 
 declare global {
   interface Window {
@@ -20,12 +21,15 @@ declare global {
 export function ReadBriefButton({ summary }: ReadBriefButtonProps) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isPrefetched, setIsPrefetched] = useState(Boolean(prefetchedBriefAudio.get(summary)));
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+  const prefetchedAudioRef = useRef<ArrayBuffer | null>(prefetchedBriefAudio.get(summary) ?? null);
+  const prefetchPromiseRef = useRef<Promise<ArrayBuffer | null> | null>(null);
 
   useEffect(() => {
     return () => {
@@ -44,6 +48,65 @@ export function ReadBriefButton({ summary }: ReadBriefButtonProps) {
       }
     };
   }, []);
+
+  useEffect(() => {
+    prefetchedAudioRef.current = prefetchedBriefAudio.get(summary) ?? null;
+    setIsPrefetched(Boolean(prefetchedAudioRef.current));
+    prefetchPromiseRef.current = null;
+
+    if (!summary.trim()) {
+      return;
+    }
+
+    if (prefetchedAudioRef.current) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const startPrefetch =
+      typeof window !== "undefined" && "requestIdleCallback" in window
+        ? window.requestIdleCallback.bind(window)
+        : (callback: IdleRequestCallback) =>
+            window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 }), 500);
+    const cancelPrefetch =
+      typeof window !== "undefined" && "cancelIdleCallback" in window
+        ? (taskId: number) => window.cancelIdleCallback(taskId)
+        : (taskId: number) => window.clearTimeout(taskId);
+
+    const taskId = startPrefetch(() => {
+      prefetchPromiseRef.current = fetch("/api/brief-audio", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: summary,
+          mode: "brief",
+        }),
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            return null;
+          }
+
+          const audioBuffer = await response.arrayBuffer();
+          prefetchedBriefAudio.set(summary, audioBuffer);
+          prefetchedAudioRef.current = audioBuffer;
+          setIsPrefetched(true);
+          return audioBuffer;
+        })
+        .catch(() => null)
+        .finally(() => {
+          prefetchPromiseRef.current = null;
+        });
+    });
+
+    return () => {
+      controller.abort();
+      cancelPrefetch(taskId);
+    };
+  }, [summary]);
 
   const ensureAudioContext = async () => {
     if (typeof window === "undefined") {
@@ -105,6 +168,59 @@ export function ReadBriefButton({ summary }: ReadBriefButtonProps) {
     setIsSpeaking(false);
   };
 
+  const playAudioBuffer = async (audioBuffer: ArrayBuffer) => {
+    const context = await ensureAudioContext();
+
+    if (context) {
+      const decoded = await context.decodeAudioData(audioBuffer.slice(0));
+      setIsSpeaking(true);
+
+      await new Promise<void>((resolve, reject) => {
+        const source = context.createBufferSource();
+        audioSourceRef.current = source;
+        source.buffer = decoded;
+        source.connect(gainNodeRef.current ?? context.destination);
+        source.onended = () => {
+          audioSourceRef.current = null;
+          setIsSpeaking(false);
+          resolve();
+        };
+
+        try {
+          source.start(0);
+        } catch {
+          reject(new Error("AI-oplæsningen kunne ikke afspilles."));
+        }
+      });
+
+      return;
+    }
+
+    const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
+
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+    }
+
+    const objectUrl = URL.createObjectURL(blob);
+    objectUrlRef.current = objectUrl;
+
+    const audio = new Audio(objectUrl);
+    audio.preload = "auto";
+    audio.setAttribute("playsinline", "true");
+    audio.volume = 1;
+    audioRef.current = audio;
+    audio.onplay = () => setIsSpeaking(true);
+    audio.onended = () => setIsSpeaking(false);
+    audio.onpause = () => setIsSpeaking(false);
+    audio.onerror = () => {
+      setIsSpeaking(false);
+      setError("AI-oplæsningen kunne ikke afspilles.");
+    };
+
+    await audio.play();
+  };
+
   const toggleSpeech = () => {
     if (isSpeaking) {
       stopAudio();
@@ -117,72 +233,36 @@ export function ReadBriefButton({ summary }: ReadBriefButtonProps) {
     void (async () => {
       try {
         await unlockAudioOutput();
+        let audioBuffer = prefetchedAudioRef.current;
 
-        const response = await fetch("/api/brief-audio", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            text: summary,
-            mode: "brief",
-          }),
-        });
-
-        if (!response.ok) {
-          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-          throw new Error(payload?.error ?? "Oplæsning kunne ikke startes.");
+        if (!audioBuffer && prefetchPromiseRef.current) {
+          audioBuffer = await prefetchPromiseRef.current;
         }
 
-        const audioBuffer = await response.arrayBuffer();
-        const context = await ensureAudioContext();
-
-        if (context) {
-          const decoded = await context.decodeAudioData(audioBuffer.slice(0));
-          setIsSpeaking(true);
-
-          await new Promise<void>((resolve, reject) => {
-            const source = context.createBufferSource();
-            audioSourceRef.current = source;
-            source.buffer = decoded;
-            source.connect(gainNodeRef.current ?? context.destination);
-            source.onended = () => {
-              audioSourceRef.current = null;
-              setIsSpeaking(false);
-              resolve();
-            };
-
-            try {
-              source.start(0);
-            } catch {
-              reject(new Error("AI-oplæsningen kunne ikke afspilles."));
-            }
+        if (!audioBuffer) {
+          const response = await fetch("/api/brief-audio", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              text: summary,
+              mode: "brief",
+            }),
           });
-        } else {
-          const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
 
-          if (objectUrlRef.current) {
-            URL.revokeObjectURL(objectUrlRef.current);
+          if (!response.ok) {
+            const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+            throw new Error(payload?.error ?? "Oplæsning kunne ikke startes.");
           }
 
-          const objectUrl = URL.createObjectURL(blob);
-          objectUrlRef.current = objectUrl;
-
-          const audio = new Audio(objectUrl);
-          audio.preload = "auto";
-          audio.setAttribute("playsinline", "true");
-          audio.volume = 1;
-          audioRef.current = audio;
-          audio.onplay = () => setIsSpeaking(true);
-          audio.onended = () => setIsSpeaking(false);
-          audio.onpause = () => setIsSpeaking(false);
-          audio.onerror = () => {
-            setIsSpeaking(false);
-            setError("AI-oplæsningen kunne ikke afspilles.");
-          };
-
-          await audio.play();
+          audioBuffer = await response.arrayBuffer();
+          prefetchedBriefAudio.set(summary, audioBuffer);
+          prefetchedAudioRef.current = audioBuffer;
+          setIsPrefetched(true);
         }
+
+        await playAudioBuffer(audioBuffer);
       } catch (nextError) {
         setError(
           nextError instanceof Error ? nextError.message : "AI-oplæsningen fejlede.",
@@ -203,7 +283,13 @@ export function ReadBriefButton({ summary }: ReadBriefButtonProps) {
         className="rounded-full border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white disabled:opacity-50"
       >
         {isSpeaking ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-        {isLoading ? "Forbereder stemme..." : isSpeaking ? "Stop oplæsning" : "Læs brief højt"}
+        {isLoading
+          ? isPrefetched
+            ? "Starter oplæsning..."
+            : "Forbereder stemme..."
+          : isSpeaking
+            ? "Stop oplæsning"
+            : "Læs brief højt"}
       </Button>
       <p className="text-xs leading-6 text-white/45">
         Oplæsningen bruger en AI-genereret stemme.
