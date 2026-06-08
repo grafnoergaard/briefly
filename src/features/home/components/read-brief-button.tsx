@@ -9,15 +9,31 @@ type ReadBriefButtonProps = {
   summary: string;
 };
 
+declare global {
+  interface Window {
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
+
 export function ReadBriefButton({ summary }: ReadBriefButtonProps) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   useEffect(() => {
     return () => {
+      if (audioSourceRef.current) {
+        try {
+          audioSourceRef.current.stop();
+        } catch {}
+        audioSourceRef.current.disconnect();
+        audioSourceRef.current = null;
+      }
+
       audioRef.current?.pause();
 
       if (objectUrlRef.current) {
@@ -26,11 +42,63 @@ export function ReadBriefButton({ summary }: ReadBriefButtonProps) {
     };
   }, []);
 
-  const toggleSpeech = () => {
-    if (isSpeaking && audioRef.current) {
+  const ensureAudioContext = async () => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    const AudioContextConstructor = window.AudioContext ?? window.webkitAudioContext;
+
+    if (!AudioContextConstructor) {
+      return null;
+    }
+
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContextConstructor();
+    }
+
+    if (audioContextRef.current.state === "suspended") {
+      await audioContextRef.current.resume();
+    }
+
+    return audioContextRef.current;
+  };
+
+  const unlockAudioOutput = async () => {
+    const context = await ensureAudioContext();
+
+    if (!context) {
+      return;
+    }
+
+    const buffer = context.createBuffer(1, 1, context.sampleRate);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    source.start(0);
+  };
+
+  const stopAudio = () => {
+    if (audioSourceRef.current) {
+      try {
+        audioSourceRef.current.stop();
+      } catch {}
+      audioSourceRef.current.disconnect();
+      audioSourceRef.current = null;
+    }
+
+    if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
-      setIsSpeaking(false);
+      audioRef.current = null;
+    }
+
+    setIsSpeaking(false);
+  };
+
+  const toggleSpeech = () => {
+    if (isSpeaking) {
+      stopAudio();
       return;
     }
 
@@ -39,6 +107,8 @@ export function ReadBriefButton({ summary }: ReadBriefButtonProps) {
 
     void (async () => {
       try {
+        await unlockAudioOutput();
+
         const response = await fetch("/api/brief-audio", {
           method: "POST",
           headers: {
@@ -55,26 +125,54 @@ export function ReadBriefButton({ summary }: ReadBriefButtonProps) {
           throw new Error(payload?.error ?? "Oplæsning kunne ikke startes.");
         }
 
-        const blob = await response.blob();
+        const audioBuffer = await response.arrayBuffer();
+        const context = await ensureAudioContext();
 
-        if (objectUrlRef.current) {
-          URL.revokeObjectURL(objectUrlRef.current);
+        if (context) {
+          const decoded = await context.decodeAudioData(audioBuffer.slice(0));
+          setIsSpeaking(true);
+
+          await new Promise<void>((resolve, reject) => {
+            const source = context.createBufferSource();
+            audioSourceRef.current = source;
+            source.buffer = decoded;
+            source.connect(context.destination);
+            source.onended = () => {
+              audioSourceRef.current = null;
+              setIsSpeaking(false);
+              resolve();
+            };
+
+            try {
+              source.start(0);
+            } catch {
+              reject(new Error("AI-oplæsningen kunne ikke afspilles."));
+            }
+          });
+        } else {
+          const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
+
+          if (objectUrlRef.current) {
+            URL.revokeObjectURL(objectUrlRef.current);
+          }
+
+          const objectUrl = URL.createObjectURL(blob);
+          objectUrlRef.current = objectUrl;
+
+          const audio = new Audio(objectUrl);
+          audio.preload = "auto";
+          audio.setAttribute("playsinline", "true");
+          audioRef.current = audio;
+          audio.onplay = () => setIsSpeaking(true);
+          audio.onended = () => setIsSpeaking(false);
+          audio.onpause = () => setIsSpeaking(false);
+          audio.onerror = () => {
+            setIsSpeaking(false);
+            setError("AI-oplæsningen kunne ikke afspilles.");
+          };
+
+          await audio.play();
         }
-
-        const objectUrl = URL.createObjectURL(blob);
-        objectUrlRef.current = objectUrl;
-
-        const audio = new Audio(objectUrl);
-        audioRef.current = audio;
-        audio.onplay = () => setIsSpeaking(true);
-        audio.onended = () => setIsSpeaking(false);
-        audio.onpause = () => setIsSpeaking(false);
-        audio.onerror = () => {
-          setIsSpeaking(false);
-          setError("AI-oplæsningen kunne ikke afspilles.");
-        };
-
-        await audio.play();
       } catch (nextError) {
         setError(
           nextError instanceof Error ? nextError.message : "AI-oplæsningen fejlede.",

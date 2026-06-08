@@ -67,6 +67,7 @@ declare global {
   interface Window {
     SpeechRecognition?: new () => SpeechRecognitionLike;
     webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    webkitAudioContext?: typeof AudioContext;
   }
 }
 
@@ -102,6 +103,8 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
   const voiceConversationActiveRef = useRef(false);
   const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
   const playbackUrlRef = useRef<string | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   const canSubmit = draft.trim().length > 0 && !isPending;
   const visibleMessages =
@@ -180,6 +183,14 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
   }, []);
 
   const stopPlayback = useCallback(() => {
+    if (audioSourceRef.current) {
+      try {
+        audioSourceRef.current.stop();
+      } catch {}
+      audioSourceRef.current.disconnect();
+      audioSourceRef.current = null;
+    }
+
     playbackAudioRef.current?.pause();
     playbackAudioRef.current = null;
 
@@ -188,6 +199,42 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
       playbackUrlRef.current = null;
     }
   }, []);
+
+  const ensureAudioContext = useCallback(async () => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    const AudioContextConstructor = window.AudioContext ?? window.webkitAudioContext;
+
+    if (!AudioContextConstructor) {
+      return null;
+    }
+
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContextConstructor();
+    }
+
+    if (audioContextRef.current.state === "suspended") {
+      await audioContextRef.current.resume();
+    }
+
+    return audioContextRef.current;
+  }, []);
+
+  const unlockAudioOutput = useCallback(async () => {
+    const context = await ensureAudioContext();
+
+    if (!context) {
+      return;
+    }
+
+    const buffer = context.createBuffer(1, 1, context.sampleRate);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    source.start(0);
+  }, [ensureAudioContext]);
 
   const clearListeningCommitTimeout = useCallback(() => {
     if (listeningCommitTimeoutRef.current) {
@@ -242,22 +289,48 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
           throw new Error(payload?.error ?? "Briefly kunne ikke læse svaret op.");
         }
 
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        playbackUrlRef.current = objectUrl;
+        const audioBuffer = await response.arrayBuffer();
+        const context = await ensureAudioContext();
 
-        const audio = new Audio(objectUrl);
-        playbackAudioRef.current = audio;
+        if (context) {
+          const decoded = await context.decodeAudioData(audioBuffer.slice(0));
 
-        await new Promise<void>((resolve, reject) => {
-          audio.onended = () => {
-            resolve();
-          };
-          audio.onerror = () => {
-            reject(new Error("Briefly kunne ikke afspille svaret."));
-          };
-          void audio.play().catch(reject);
-        });
+          await new Promise<void>((resolve, reject) => {
+            const source = context.createBufferSource();
+            audioSourceRef.current = source;
+            source.buffer = decoded;
+            source.connect(context.destination);
+            source.onended = () => {
+              audioSourceRef.current = null;
+              resolve();
+            };
+
+            try {
+              source.start(0);
+            } catch {
+              reject(new Error("Briefly kunne ikke afspille svaret."));
+            }
+          });
+        } else {
+          const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
+          const objectUrl = URL.createObjectURL(blob);
+          playbackUrlRef.current = objectUrl;
+
+          const audio = new Audio(objectUrl);
+          audio.preload = "auto";
+          audio.setAttribute("playsinline", "true");
+          playbackAudioRef.current = audio;
+
+          await new Promise<void>((resolve, reject) => {
+            audio.onended = () => {
+              resolve();
+            };
+            audio.onerror = () => {
+              reject(new Error("Briefly kunne ikke afspille svaret."));
+            };
+            void audio.play().catch(reject);
+          });
+        }
       } catch (error) {
         setVoiceStatus(
           error instanceof Error ? error.message : "Briefly kunne ikke læse svaret op.",
@@ -272,7 +345,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
         }
       }
     },
-    [startListeningCycle, stopPlayback],
+    [ensureAudioContext, startListeningCycle, stopPlayback],
   );
 
   const submitMessage = useCallback((message: string, options?: SubmitMessageOptions) => {
@@ -495,6 +568,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
     setRealtimeStatus("Starter samtale…");
 
     try {
+      await unlockAudioOutput();
       voiceConversationActiveRef.current = true;
       setIsRealtimeActive(true);
       startListeningCycle();
@@ -507,7 +581,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
     } finally {
       setIsRealtimePending(false);
     }
-  }, [isRealtimePending, speechRecognitionSupported, startListeningCycle]);
+  }, [isRealtimePending, speechRecognitionSupported, startListeningCycle, unlockAudioOutput]);
 
   useEffect(() => {
     return () => {
@@ -589,11 +663,11 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
           </div>
 
           <form
-              className={
-                variant === "embedded"
-                  ? "rounded-[24px] border border-white/10 bg-white/5 p-2.5 sm:rounded-[28px] sm:p-3"
-                  : "mt-5 rounded-[28px] border border-black/5 bg-[#f7f7f3] p-3"
-              }
+            className={
+              variant === "embedded"
+                ? "rounded-[24px] border border-white/10 bg-white/5 p-2.5 sm:rounded-[28px] sm:p-3"
+                : "mt-5 rounded-[28px] border border-black/5 bg-[#f7f7f3] p-3"
+            }
             onSubmit={(event) => {
               event.preventDefault();
 
@@ -604,14 +678,14 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
               }
 
               setDraft("");
-      submitMessage(nextMessage, { channel: "text" });
+              submitMessage(nextMessage, { channel: "text" });
             }}
-            >
+          >
             <label className="block">
               <span className="sr-only">Message Briefly</span>
-              <div className="relative">
+              <div className="space-y-3">
                 <div
-                  className={`pointer-events-none absolute inset-x-3 top-3 z-10 rounded-[18px] border px-3 py-3 backdrop-blur-sm sm:rounded-[20px] sm:px-4 ${
+                  className={`rounded-[18px] border px-3 py-3 backdrop-blur-sm sm:rounded-[20px] sm:px-4 ${
                     variant === "embedded"
                       ? "border-white/10 bg-white/6"
                       : "border-[#3C5C4E]/10 bg-[#f4f6f2]"
@@ -712,7 +786,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
                   rows={4}
                   className={
                     variant === "embedded"
-                      ? "min-h-36 w-full resize-none rounded-[20px] border border-transparent bg-white/95 px-4 pb-4 pt-[5.45rem] text-sm leading-7 text-foreground outline-none transition focus:border-white/20 focus:ring-2 focus:ring-white/10 sm:min-h-40 sm:rounded-[22px] sm:pt-24"
+                      ? "min-h-36 w-full resize-none rounded-[20px] border border-transparent bg-white/95 px-4 py-4 text-sm leading-7 text-foreground outline-none transition focus:border-white/20 focus:ring-2 focus:ring-white/10 sm:min-h-40 sm:rounded-[22px]"
                       : "min-h-40 w-full resize-none rounded-[22px] border border-transparent bg-white px-4 pb-4 pt-24 text-sm leading-7 text-foreground outline-none transition focus:border-[#3C5C4E] focus:ring-2 focus:ring-[#3C5C4E]/10"
                   }
                 />
