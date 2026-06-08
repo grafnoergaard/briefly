@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getAiBriefSettings } from "@/lib/ai-settings";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const requestSchema = z.object({
   text: z.string().trim().min(1).max(4096),
+  mode: z.enum(["brief", "assistant"]).optional(),
 });
 
 export async function POST(request: Request) {
@@ -53,6 +55,13 @@ export async function POST(request: Request) {
     );
   }
 
+  const settings = await getAiBriefSettings(user.id);
+  const sharedVoiceInstructions = settings.voiceStyle.trim();
+  const modeInstruction =
+    parsedBody.data.mode === "assistant"
+      ? "Læs som Brieflys direkte svar til brugeren. Hold det nærværende, naturligt og let at følge."
+      : "Læs som Brieflys oplæsning af briefen. Hold det roligt, naturligt og let at følge.";
+
   const response = await fetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
     headers: {
@@ -61,11 +70,11 @@ export async function POST(request: Request) {
     },
     body: JSON.stringify({
       model: "gpt-4o-mini-tts",
-      voice: "coral",
+      voice: settings.voice,
       response_format: "mp3",
+      speed: settings.voiceSpeed,
       input: parsedBody.data.text,
-      instructions:
-        "Speak Danish. Sound calm, warm, clear, and helpful. Read like a premium daily briefing for a family, with natural pauses and confident pronunciation.",
+      instructions: `Speak Danish. ${sharedVoiceInstructions} ${modeInstruction}`,
     }),
     signal: AbortSignal.timeout(15000),
     cache: "no-store",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
-import { Loader2, Mic, MicOff, Sparkles, User2, Volume2, VolumeX } from "lucide-react";
+import { Loader2, Mic, Sparkles, User2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -11,6 +11,28 @@ type ChatMessage = {
   content: string;
   meta?: string | null;
   isError?: boolean;
+};
+
+type AssistantHistoryMessage = {
+  role: "assistant" | "user";
+  content: string;
+};
+
+type AssistantApiPayload = {
+  reply?: string;
+  action?: string;
+  createdEvent?: {
+    title: string;
+    calendarName: string;
+    timeLabel: string;
+  } | null;
+  completedActions?: string[];
+  error?: string;
+};
+
+type SubmitMessageOptions = {
+  speakReply?: boolean;
+  channel?: "text" | "voice";
 };
 
 type AssistantChatProps = {
@@ -33,6 +55,7 @@ type SpeechRecognitionLike = EventTarget & {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
+  onstart: (() => void) | null;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onerror: ((event: Event & { error?: string }) => void) | null;
   onend: (() => void) | null;
@@ -48,6 +71,7 @@ declare global {
 }
 
 export function AssistantChat({ variant = "page" }: AssistantChatProps) {
+  const LISTENING_PAUSE_MS = 1800;
   const hasMounted = useSyncExternalStore(
     () => () => {},
     () => true,
@@ -66,19 +90,18 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
   const [isPending, startTransition] = useTransition();
   const [isListening, setIsListening] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<string | null>(null);
-  const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(false);
   const [isRealtimeActive, setIsRealtimeActive] = useState(false);
   const [isRealtimePending, setIsRealtimePending] = useState(false);
   const [realtimeStatus, setRealtimeStatus] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const transcriptRef = useRef("");
-  const lastSpokenMessageIdRef = useRef<string | null>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-  const realtimePeerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const realtimeDataChannelRef = useRef<RTCDataChannel | null>(null);
-  const realtimeLocalStreamRef = useRef<MediaStream | null>(null);
-  const realtimeAssistantMessageIdRef = useRef<string | null>(null);
-  const handledRealtimeCallIdsRef = useRef<Set<string>>(new Set());
+  const finalTranscriptRef = useRef("");
+  const listeningCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shouldCommitTranscriptRef = useRef(false);
+  const messagesRef = useRef<ChatMessage[]>(messages);
+  const voiceConversationActiveRef = useRef(false);
+  const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
+  const playbackUrlRef = useRef<string | null>(null);
 
   const canSubmit = draft.trim().length > 0 && !isPending;
   const visibleMessages =
@@ -92,18 +115,168 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
     typeof window !== "undefined" &&
     (typeof window.SpeechRecognition !== "undefined" ||
       typeof window.webkitSpeechRecognition !== "undefined");
-  const speechSynthesisSupported =
-    hasMounted &&
-    typeof window !== "undefined" &&
-    typeof window.speechSynthesis !== "undefined";
   const realtimeVoiceSupported =
     hasMounted &&
-    typeof window !== "undefined" &&
-    typeof window.RTCPeerConnection !== "undefined" &&
-    typeof navigator !== "undefined" &&
-    typeof navigator.mediaDevices?.getUserMedia === "function";
+    speechRecognitionSupported;
 
-  const submitMessage = (message: string) => {
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    voiceConversationActiveRef.current = isRealtimeActive;
+  }, [isRealtimeActive]);
+
+  const buildAssistantHistory = useCallback((source: ChatMessage[]) => {
+    return source
+      .filter(
+        (item) =>
+          (item.role === "assistant" || item.role === "user") &&
+          item.meta !== "Arbejder" &&
+          !item.isError,
+      )
+      .map((item) => ({
+        role: item.role,
+        content: item.content,
+      }))
+      .slice(-16);
+  }, []);
+
+  const buildVisualConfirmation = useCallback((payload: AssistantApiPayload) => {
+    const actions = payload.completedActions ?? [];
+
+    if (actions.length === 0) {
+      return null;
+    }
+
+    return actions
+      .map((action) => {
+        const segments = action.split("·").map((segment) => segment.trim());
+        const [kind, first, second, third] = segments;
+
+        if (kind === "Calendar") {
+          return `Opretter aftalen “${first}” i kalenderen${second ? ` (${second})` : ""}.`;
+        }
+
+        if (kind === "Kalender" && first === "slettet") {
+          return `Sletter aftalen “${second}” i kalenderen${third ? ` (${third})` : ""}.`;
+        }
+
+        if (kind === "Task") {
+          return `Tilføjer to-do: “${first}”.`;
+        }
+
+        if (kind === "Shopping") {
+          return `Tilføjer til indkøbslisten: ${first}.`;
+        }
+
+        if (kind === "Meal plan") {
+          return `Lægger på madplanen: “${first}”${second ? ` (${second})` : ""}.`;
+        }
+
+        return action;
+      })
+      .join(" ");
+  }, []);
+
+  const stopPlayback = useCallback(() => {
+    playbackAudioRef.current?.pause();
+    playbackAudioRef.current = null;
+
+    if (playbackUrlRef.current) {
+      URL.revokeObjectURL(playbackUrlRef.current);
+      playbackUrlRef.current = null;
+    }
+  }, []);
+
+  const clearListeningCommitTimeout = useCallback(() => {
+    if (listeningCommitTimeoutRef.current) {
+      clearTimeout(listeningCommitTimeoutRef.current);
+      listeningCommitTimeoutRef.current = null;
+    }
+  }, []);
+
+  const resetTranscriptState = useCallback(() => {
+    transcriptRef.current = "";
+    finalTranscriptRef.current = "";
+    setDraft("");
+  }, []);
+
+  const startListeningCycle = useCallback(() => {
+    if (!voiceConversationActiveRef.current || !recognitionRef.current) {
+      return;
+    }
+
+    clearListeningCommitTimeout();
+    shouldCommitTranscriptRef.current = true;
+    resetTranscriptState();
+    setRealtimeStatus("Briefly åbner mikrofonen…");
+
+    try {
+      recognitionRef.current.start();
+    } catch {
+      setIsListening(true);
+      setRealtimeStatus("Briefly lytter. Tal frit.");
+    }
+  }, [clearListeningCommitTimeout, resetTranscriptState]);
+
+  const speakAssistantReply = useCallback(
+    async (text: string) => {
+      try {
+        stopPlayback();
+        setVoiceStatus("Briefly svarer…");
+
+        const response = await fetch("/api/brief-audio", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            text,
+            mode: "assistant",
+          }),
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(payload?.error ?? "Briefly kunne ikke læse svaret op.");
+        }
+
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        playbackUrlRef.current = objectUrl;
+
+        const audio = new Audio(objectUrl);
+        playbackAudioRef.current = audio;
+
+        await new Promise<void>((resolve, reject) => {
+          audio.onended = () => {
+            resolve();
+          };
+          audio.onerror = () => {
+            reject(new Error("Briefly kunne ikke afspille svaret."));
+          };
+          void audio.play().catch(reject);
+        });
+      } catch (error) {
+        setVoiceStatus(
+          error instanceof Error ? error.message : "Briefly kunne ikke læse svaret op.",
+        );
+      } finally {
+        stopPlayback();
+        if (voiceConversationActiveRef.current) {
+          setVoiceStatus(null);
+          setTimeout(() => {
+            startListeningCycle();
+          }, 250);
+        }
+      }
+    },
+    [startListeningCycle, stopPlayback],
+  );
+
+  const submitMessage = useCallback((message: string, options?: SubmitMessageOptions) => {
+    const history: AssistantHistoryMessage[] = buildAssistantHistory(messagesRef.current);
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
@@ -131,47 +304,59 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
           },
           body: JSON.stringify({
             message,
+            channel: options?.channel ?? "text",
+            history,
           }),
         });
 
-        const payload = (await response.json()) as
-          | {
-              reply?: string;
-              action?: string;
-              createdEvent?: {
-                title: string;
-                calendarName: string;
-                timeLabel: string;
-              } | null;
-              completedActions?: string[];
-              error?: string;
-            }
-          | undefined;
+        const payload = (await response.json()) as AssistantApiPayload | undefined;
 
         if (!response.ok || payload?.error) {
           throw new Error(payload?.error ?? "Briefly-assistenten fejlede.");
         }
 
+        const visualConfirmation = payload ? buildVisualConfirmation(payload) : null;
+
         setMessages((current) =>
-          current.map((item) =>
-            item.id === placeholderId
-              ? {
-                  id: placeholderId,
-                  role: "assistant",
-                  content: payload?.reply ?? "Det er på plads.",
-                  meta: payload?.completedActions && payload.completedActions.length > 0
-                    ? payload.completedActions.join(" | ")
-                    : payload?.createdEvent
-                      ? `Oprettet i ${payload.createdEvent.calendarName} · ${payload.createdEvent.timeLabel}`
-                    : payload?.action === "clarify"
-                      ? "Behøver afklaring"
-                      : "Svar",
-                }
-              : item,
-          ),
+          current.flatMap((item) => {
+            if (item.id !== placeholderId) {
+              return [item];
+            }
+
+            const assistantReply: ChatMessage = {
+              id: placeholderId,
+              role: "assistant",
+              content: payload?.reply ?? "Det er på plads.",
+              meta: payload?.completedActions && payload.completedActions.length > 0
+                ? payload.completedActions.join(" | ")
+                : payload?.createdEvent
+                  ? `Oprettet i ${payload.createdEvent.calendarName} · ${payload.createdEvent.timeLabel}`
+                  : payload?.action === "clarify"
+                    ? "Behøver afklaring"
+                    : "Svar",
+            };
+
+            if (!visualConfirmation) {
+              return [assistantReply];
+            }
+
+            return [
+              {
+                id: `${placeholderId}-confirm`,
+                role: "assistant",
+                content: visualConfirmation,
+                meta: "Forstået",
+              },
+              assistantReply,
+            ];
+          }),
         );
+
+        if (options?.speakReply && payload?.reply) {
+          await speakAssistantReply(payload.reply);
+        }
       } catch (error) {
-        const message =
+        const nextMessage =
           error instanceof Error ? error.message : "Briefly-assistenten fejlede uventet.";
 
         setMessages((current) =>
@@ -180,7 +365,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
               ? {
                   id: placeholderId,
                   role: "assistant",
-                  content: message,
+                  content: nextMessage,
                   meta: "Fejl",
                   isError: true,
                 }
@@ -189,7 +374,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
         );
       }
     });
-  };
+  }, [buildAssistantHistory, buildVisualConfirmation, speakAssistantReply]);
 
   useEffect(() => {
     if (!speechRecognitionSupported || recognitionRef.current) {
@@ -204,532 +389,138 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
     }
 
     const recognition = new SpeechRecognitionConstructor();
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "da-DK";
 
+    recognition.onstart = () => {
+      setIsListening(true);
+      setRealtimeStatus("Briefly lytter nu.");
+    };
+
     recognition.onresult = (event) => {
-      let transcript = "";
+      let nextFinalTranscript = finalTranscriptRef.current;
+      let interimTranscript = "";
 
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        transcript += event.results[index][0].transcript;
+        const nextTranscript = event.results[index][0].transcript.trim();
+
+        if (!nextTranscript) {
+          continue;
+        }
+
+        if (event.results[index].isFinal) {
+          nextFinalTranscript = `${nextFinalTranscript} ${nextTranscript}`.trim();
+        } else {
+          interimTranscript = `${interimTranscript} ${nextTranscript}`.trim();
+        }
       }
 
-      transcriptRef.current = transcript.trim();
+      finalTranscriptRef.current = nextFinalTranscript;
+      transcriptRef.current = `${nextFinalTranscript} ${interimTranscript}`.trim();
       setDraft(transcriptRef.current);
-      setVoiceStatus("Lytter…");
+      setRealtimeStatus(interimTranscript ? "Briefly lytter…" : "Briefly samler din besked…");
+
+      clearListeningCommitTimeout();
+      listeningCommitTimeoutRef.current = setTimeout(() => {
+        if (!voiceConversationActiveRef.current || !recognitionRef.current) {
+          return;
+        }
+
+        setRealtimeStatus("Briefly gør sig klar til at svare…");
+        recognitionRef.current.stop();
+      }, LISTENING_PAUSE_MS);
     };
 
     recognition.onerror = (event) => {
       setIsListening(false);
-      setVoiceStatus(
+      clearListeningCommitTimeout();
+      setRealtimeStatus(
         event.error === "not-allowed"
           ? "Mikrofonadgang blev ikke givet."
-          : "Talegenkendelse fejlede. Prøv igen.",
+          : "Stemmeinput fejlede. Prøv igen.",
       );
     };
 
     recognition.onend = () => {
-      const finalTranscript = transcriptRef.current.trim();
-
+      clearListeningCommitTimeout();
+      const finalTranscript = (finalTranscriptRef.current || transcriptRef.current).trim();
       setIsListening(false);
-      setVoiceStatus(finalTranscript ? "Tale fanget." : null);
 
-      if (finalTranscript) {
-        transcriptRef.current = "";
-        setDraft("");
-        submitMessage(finalTranscript);
+      if (!voiceConversationActiveRef.current) {
+        return;
       }
+
+      if (!shouldCommitTranscriptRef.current) {
+        resetTranscriptState();
+        return;
+      }
+
+      if (!finalTranscript) {
+        setTimeout(() => {
+          startListeningCycle();
+        }, 250);
+        return;
+      }
+
+      resetTranscriptState();
+      setRealtimeStatus("Briefly tænker…");
+      submitMessage(finalTranscript, { speakReply: true, channel: "voice" });
     };
 
     recognitionRef.current = recognition;
-  }, [speechRecognitionSupported]);
+  }, [clearListeningCommitTimeout, resetTranscriptState, speechRecognitionSupported, startListeningCycle, submitMessage]);
 
-  const toggleVoiceInput = () => {
-    if (!recognitionRef.current || isPending) {
-      return;
-    }
-
-    if (isListening) {
-      recognitionRef.current.stop();
-      setVoiceStatus("Stopper…");
-      return;
-    }
-
-    transcriptRef.current = "";
-    setDraft("");
-    setVoiceStatus("Starter mikrofon…");
-    setIsListening(true);
-    recognitionRef.current.start();
-  };
-
-  function speakText(text: string) {
-    if (!speechSynthesisSupported) {
-      setVoiceStatus("Stemmesvar understøttes ikke i denne browser.");
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "da-DK";
-    utterance.rate = 1;
-    utterance.pitch = 1;
-    utterance.onstart = () => setVoiceStatus("Briefly svarer med stemme…");
-    utterance.onend = () => setVoiceStatus("Stemmesvar afspillet.");
-    utterance.onerror = () => setVoiceStatus("Stemmesvar kunne ikke afspilles.");
-    window.speechSynthesis.speak(utterance);
-  }
-
-  const sendRealtimeEvent = (event: Record<string, unknown>) => {
-    const channel = realtimeDataChannelRef.current;
-
-    if (!channel || channel.readyState !== "open") {
-      return;
-    }
-
-    channel.send(JSON.stringify(event));
-  };
-
-  const appendRealtimeAssistantDelta = (delta: string) => {
-    if (!delta) {
-      return;
-    }
-
-    setMessages((current) => {
-      const existingId = realtimeAssistantMessageIdRef.current;
-
-      if (!existingId) {
-        const nextId = crypto.randomUUID();
-        realtimeAssistantMessageIdRef.current = nextId;
-        return [
-          ...current,
-          {
-            id: nextId,
-            role: "assistant",
-            content: delta,
-            meta: "Live voice",
-          },
-        ];
-      }
-
-      return current.map((message) =>
-        message.id === existingId
-          ? {
-              ...message,
-              content: `${message.content}${delta}`,
-              meta: "Live voice",
-            }
-          : message,
-      );
-    });
-  };
-
-  const completeRealtimeAssistantMessage = () => {
-    realtimeAssistantMessageIdRef.current = null;
-  };
-
-  const appendRealtimeUserTranscript = (transcript: string) => {
-    const nextTranscript = transcript.trim();
-
-    if (!nextTranscript) {
-      return;
-    }
-
-    setMessages((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        role: "user",
-        content: nextTranscript,
-      },
-    ]);
-  };
-
-  const runRealtimeAssistantTool = async (callId: string, rawArguments: string) => {
-    if (handledRealtimeCallIdsRef.current.has(callId)) {
-      return;
-    }
-
-    handledRealtimeCallIdsRef.current.add(callId);
-    setRealtimeStatus("Briefly udfører handlingen…");
-
-    let output = "";
-
-    try {
-      const parsedArguments = JSON.parse(rawArguments) as { instruction?: string };
-      const instruction = parsedArguments.instruction?.trim();
-
-      if (!instruction) {
-        throw new Error("Realtime action mangler instruction.");
-      }
-
-      const response = await fetch("/api/assistant", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: instruction,
-        }),
-      });
-
-      const payload = (await response.json()) as
-        | {
-            reply?: string;
-            createdEvent?: {
-              title: string;
-              calendarName: string;
-              timeLabel: string;
-            } | null;
-            completedActions?: string[];
-            error?: string;
-          }
-        | undefined;
-
-      if (!response.ok || payload?.error) {
-        throw new Error(payload?.error ?? "Briefly-assistenten fejlede.");
-      }
-
-      output = JSON.stringify({
-        ok: true,
-        reply: payload?.reply ?? "Det er på plads.",
-        completedActions: payload?.completedActions ?? [],
-        createdEvent: payload?.createdEvent ?? null,
-      });
-    } catch (error) {
-      output = JSON.stringify({
-        ok: false,
-        error: error instanceof Error ? error.message : "Realtime-handlingen fejlede.",
-      });
-    }
-
-    sendRealtimeEvent({
-      type: "conversation.item.create",
-      item: {
-        type: "function_call_output",
-        call_id: callId,
-        output,
-      },
-    });
-    sendRealtimeEvent({
-      type: "response.create",
-    });
-    setRealtimeStatus("Live voice aktiv.");
-  };
-
-  const cleanupRealtime = useCallback(() => {
-    realtimeDataChannelRef.current?.close();
-    realtimeDataChannelRef.current = null;
-
-    realtimePeerConnectionRef.current?.close();
-    realtimePeerConnectionRef.current = null;
-
-    realtimeLocalStreamRef.current?.getTracks().forEach((track) => track.stop());
-    realtimeLocalStreamRef.current = null;
-
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.pause();
-      remoteAudioRef.current.srcObject = null;
-    }
-
-    completeRealtimeAssistantMessage();
-    handledRealtimeCallIdsRef.current.clear();
+  const stopRealtimeVoice = useCallback(() => {
+    voiceConversationActiveRef.current = false;
+    shouldCommitTranscriptRef.current = false;
     setIsRealtimeActive(false);
+    setIsListening(false);
     setIsRealtimePending(false);
-  }, []);
+    setRealtimeStatus("Samtalen er afsluttet.");
+    clearListeningCommitTimeout();
+    recognitionRef.current?.stop();
+    resetTranscriptState();
+    stopPlayback();
+  }, [clearListeningCommitTimeout, resetTranscriptState, stopPlayback]);
 
-  const handleRealtimeEvent = (event: Record<string, unknown>) => {
-    const type = typeof event.type === "string" ? event.type : null;
-
-    if (!type) {
+  const startRealtimeVoice = useCallback(async () => {
+    if (!speechRecognitionSupported || isRealtimePending) {
+      setRealtimeStatus("Stemmeinput understøttes ikke i denne browser.");
       return;
     }
 
-    if (type === "session.created" || type === "session.updated") {
-      setRealtimeStatus("Live voice aktiv.");
-      return;
-    }
-
-    if (type === "input_audio_buffer.speech_started") {
-      setRealtimeStatus("Briefly lytter…");
-      return;
-    }
-
-    if (type === "input_audio_buffer.speech_stopped") {
-      setRealtimeStatus("Briefly tænker…");
-      return;
-    }
-
-    if (type === "conversation.item.input_audio_transcription.completed") {
-      const transcript = typeof event.transcript === "string" ? event.transcript : "";
-      appendRealtimeUserTranscript(transcript);
-      return;
-    }
-
-    if (type === "response.output_text.delta") {
-      const delta = typeof event.delta === "string" ? event.delta : "";
-      appendRealtimeAssistantDelta(delta);
-      return;
-    }
-
-    if (type === "response.done") {
-      completeRealtimeAssistantMessage();
-      setRealtimeStatus("Live voice aktiv.");
-      return;
-    }
-
-    if (type === "response.output_item.done") {
-      const item =
-        event.item && typeof event.item === "object"
-          ? (event.item as Record<string, unknown>)
-          : null;
-
-      if (
-        item?.type === "function_call" &&
-        typeof item.call_id === "string" &&
-        typeof item.arguments === "string"
-      ) {
-        void runRealtimeAssistantTool(item.call_id, item.arguments);
-      }
-
-      return;
-    }
-
-    if (type === "error") {
-      const errorPayload =
-        event.error && typeof event.error === "object"
-          ? (event.error as Record<string, unknown>)
-          : null;
-      const message =
-        typeof errorPayload?.message === "string"
-          ? errorPayload.message
-          : "Live voice fejlede.";
-      setRealtimeStatus(message);
-    }
-  };
-
-  const stopRealtimeVoice = () => {
-    cleanupRealtime();
-    setRealtimeStatus("Live voice afsluttet.");
-  };
-
-  const startRealtimeVoice = async () => {
-    if (!realtimeVoiceSupported || isRealtimePending) {
-      return;
-    }
-
-    if (speechSynthesisSupported) {
-      window.speechSynthesis.cancel();
-    }
-
-    setAutoSpeakEnabled(false);
     setVoiceStatus(null);
     setIsRealtimePending(true);
-    setRealtimeStatus("Starter live voice…");
+    setRealtimeStatus("Starter samtale…");
 
     try {
-      const tokenResponse = await fetch("/api/realtime/session", {
-        method: "POST",
-      });
-      const tokenPayload = (await tokenResponse.json()) as
-        | {
-            client_secret?: {
-              value?: string;
-            };
-            value?: string;
-            error?: string;
-          }
-        | undefined;
-
-      if (!tokenResponse.ok || tokenPayload?.error) {
-        throw new Error(tokenPayload?.error ?? "Kunne ikke starte live voice.");
-      }
-
-      const ephemeralKey = tokenPayload?.client_secret?.value ?? tokenPayload?.value;
-
-      if (!ephemeralKey) {
-        throw new Error("Realtime session returnerede ikke en client secret.");
-      }
-
-      const localStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-      });
-
-      const peerConnection = new RTCPeerConnection();
-      realtimeLocalStreamRef.current = localStream;
-      realtimePeerConnectionRef.current = peerConnection;
-
-      localStream.getTracks().forEach((track) => {
-        peerConnection.addTrack(track, localStream);
-      });
-
-      peerConnection.ontrack = (event) => {
-        if (!remoteAudioRef.current) {
-          return;
-        }
-
-        remoteAudioRef.current.srcObject = event.streams[0] ?? null;
-      };
-
-      peerConnection.onconnectionstatechange = () => {
-        if (
-          peerConnection.connectionState === "failed" ||
-          peerConnection.connectionState === "disconnected" ||
-          peerConnection.connectionState === "closed"
-        ) {
-          cleanupRealtime();
-          setRealtimeStatus("Live voice forbindelsen blev afbrudt.");
-        }
-      };
-
-      const dataChannel = peerConnection.createDataChannel("oai-events");
-      realtimeDataChannelRef.current = dataChannel;
-
-      dataChannel.addEventListener("open", () => {
-        setIsRealtimeActive(true);
-        setIsRealtimePending(false);
-        setRealtimeStatus("Live voice aktiv. Tal frit til Briefly.");
-
-        sendRealtimeEvent({
-          type: "session.update",
-          session: {
-            type: "realtime",
-            instructions:
-              "You are Briefly, a Danish assistant for everyday life. Speak Danish. Keep replies practical, calm, warm, and short enough for voice. Help the user feel more clarity and less mental load. Use the life_os_action tool whenever the user asks you to create or change something in calendar, tasks, shopping, or meal plan. Do not keep talking about stale plans from earlier this week unless the user explicitly asks. If a request is ambiguous, ask one short clarification question.",
-            output_modalities: ["audio", "text"],
-            tool_choice: "auto",
-            tools: [
-              {
-                type: "function",
-                name: "life_os_action",
-                description:
-                  "Execute a Briefly action such as creating a calendar event, creating a task, adding shopping items, or creating a meal plan entry.",
-                parameters: {
-                  type: "object",
-                  additionalProperties: false,
-                  properties: {
-                    instruction: {
-                      type: "string",
-                      description:
-                        "The exact Danish instruction that should be executed by the Briefly backend.",
-                    },
-                  },
-                  required: ["instruction"],
-                },
-              },
-            ],
-          },
-        });
-      });
-
-      dataChannel.addEventListener("message", (event) => {
-        try {
-          const payload = JSON.parse(event.data) as Record<string, unknown>;
-          handleRealtimeEvent(payload);
-        } catch {
-          setRealtimeStatus("Live voice modtog en ukendt hændelse.");
-        }
-      });
-
-      dataChannel.addEventListener("close", () => {
-        cleanupRealtime();
-        setRealtimeStatus("Live voice afsluttet.");
-      });
-
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-
-      const sdpResponse = await fetch("https://api.openai.com/v1/realtime/calls", {
-        method: "POST",
-        body: offer.sdp,
-        headers: {
-          Authorization: `Bearer ${ephemeralKey}`,
-          "Content-Type": "application/sdp",
-        },
-      });
-
-      if (!sdpResponse.ok) {
-        const text = await sdpResponse.text();
-        throw new Error(text || "OpenAI Realtime WebRTC failed.");
-      }
-
-      await peerConnection.setRemoteDescription({
-        type: "answer",
-        sdp: await sdpResponse.text(),
-      });
+      voiceConversationActiveRef.current = true;
+      setIsRealtimeActive(true);
+      startListeningCycle();
     } catch (error) {
-      cleanupRealtime();
+      voiceConversationActiveRef.current = false;
+      setIsRealtimeActive(false);
       setRealtimeStatus(
-        error instanceof Error ? error.message : "Kunne ikke starte live voice.",
+        error instanceof Error ? error.message : "Kunne ikke starte samtalen.",
       );
     } finally {
       setIsRealtimePending(false);
     }
-  };
-
-  useEffect(() => {
-    if (!autoSpeakEnabled || !speechSynthesisSupported) {
-      return;
-    }
-
-    const latestAssistantMessage = [...messages]
-      .reverse()
-      .find((message) => message.role === "assistant" && !message.isError && message.meta !== "Arbejder");
-
-    if (!latestAssistantMessage) {
-      return;
-    }
-
-    if (lastSpokenMessageIdRef.current === latestAssistantMessage.id) {
-      return;
-    }
-
-    if (messages.length <= 1) {
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(latestAssistantMessage.content);
-    utterance.lang = "da-DK";
-    utterance.rate = 1;
-    utterance.pitch = 1;
-    utterance.onstart = () => setVoiceStatus("Briefly svarer med stemme…");
-    utterance.onend = () => setVoiceStatus("Stemmesvar afspillet.");
-    utterance.onerror = () => setVoiceStatus("Stemmesvar kunne ikke afspilles.");
-    window.speechSynthesis.speak(utterance);
-    lastSpokenMessageIdRef.current = latestAssistantMessage.id;
-  }, [autoSpeakEnabled, messages, speechSynthesisSupported]);
+  }, [isRealtimePending, speechRecognitionSupported, startListeningCycle]);
 
   useEffect(() => {
     return () => {
-      cleanupRealtime();
-
-      if (speechSynthesisSupported) {
-        window.speechSynthesis.cancel();
-      }
+      clearListeningCommitTimeout();
+      shouldCommitTranscriptRef.current = false;
+      recognitionRef.current?.stop();
+      resetTranscriptState();
+      stopPlayback();
     };
-  }, [cleanupRealtime, speechSynthesisSupported]);
-
-  const toggleAutoSpeak = () => {
-    if (!speechSynthesisSupported) {
-      setVoiceStatus("Stemmesvar understøttes ikke i denne browser.");
-      return;
-    }
-
-    if (autoSpeakEnabled) {
-      window.speechSynthesis.cancel();
-      setAutoSpeakEnabled(false);
-      setVoiceStatus("Auto-oplæsning er slået fra.");
-      return;
-    }
-
-    setAutoSpeakEnabled(true);
-    setVoiceStatus("Auto-oplæsning er slået til.");
-  };
+  }, [clearListeningCommitTimeout, resetTranscriptState, stopPlayback]);
 
   return (
     <div className="grid gap-4">
-      <audio ref={remoteAudioRef} autoPlay className="hidden" />
       {variant === "page" ? (
         <div className="rounded-[30px] border border-black/5 bg-[#101313] p-5 text-white shadow-[0_24px_60px_-40px_rgba(0,0,0,0.5)] sm:p-6">
           <div className="flex items-center justify-between gap-3">
@@ -746,9 +537,9 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
             </div>
           </div>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-white/72">
-            Fortæl Briefly noget i naturligt sprog, og det omsætter det til handling i kalender,
-            lister, indkøb eller madplan. Du kan skrive, trykke på mikrofonen eller tale live med
-            Realtime-stemme.
+            Fortæl Briefly noget i naturligt sprog. Det kan stille et kort opfølgende spørgsmål,
+            holde fast i konteksten og derefter hjælpe med kalender, lister, indkøb eller
+            madplan. Du kan skrive, trykke på mikrofonen eller tale live.
           </p>
         </div>
       ) : null}
@@ -767,7 +558,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
                 key={message.id}
                 className={
                   message.role === "user"
-                    ? "ml-auto max-w-[88%] rounded-[26px] bg-[#153d32] px-4 py-3 text-sm leading-7 text-white"
+                    ? "ml-auto max-w-[88%] rounded-[26px] bg-[#3C5C4E] px-4 py-3 text-sm leading-7 text-white"
                     : message.isError
                       ? "max-w-[92%] rounded-[26px] border border-red-300/40 bg-red-500/10 px-4 py-3 text-sm leading-7 text-red-100"
                       : variant === "embedded"
@@ -793,16 +584,6 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
                     {message.meta}
                   </p>
                 ) : null}
-                {variant === "page" && message.role === "assistant" && !message.isError && message.meta !== "Arbejder" ? (
-                  <button
-                    type="button"
-                    onClick={() => speakText(message.content)}
-                    className="mt-3 inline-flex items-center gap-2 rounded-full border border-black/5 bg-white/60 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-foreground/70 transition hover:bg-white"
-                  >
-                    <Volume2 className="size-3.5" />
-                    Læs højt
-                  </button>
-                ) : null}
               </div>
             ))}
           </div>
@@ -823,22 +604,119 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
               }
 
               setDraft("");
-              submitMessage(nextMessage);
+      submitMessage(nextMessage, { channel: "text" });
             }}
             >
             <label className="block">
               <span className="sr-only">Message Briefly</span>
-              <textarea
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                placeholder="Skriv det du vil have Briefly til at gøre"
-                rows={4}
-                className={
-                  variant === "embedded"
-                    ? "min-h-28 w-full resize-none rounded-[22px] border border-transparent bg-white/95 px-4 py-3 text-sm leading-7 text-foreground outline-none transition focus:border-white/20 focus:ring-2 focus:ring-white/10"
-                    : "min-h-28 w-full resize-none rounded-[22px] border border-transparent bg-white px-4 py-3 text-sm leading-7 text-foreground outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
-                }
-              />
+              <div className="relative">
+                <div
+                  className={`pointer-events-none absolute inset-x-3 top-3 z-10 rounded-[20px] border px-4 py-3 backdrop-blur-sm ${
+                    variant === "embedded"
+                      ? "border-white/10 bg-white/6"
+                      : "border-[#3C5C4E]/10 bg-[#f4f6f2]"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="relative flex size-11 items-center justify-center">
+                      <span
+                        className={`absolute inset-0 rounded-full ${
+                          isRealtimeActive
+                            ? "bg-[#3C5C4E]/20 animate-ping"
+                            : "bg-[#3C5C4E]/10"
+                        }`}
+                      />
+                      <span
+                        className={`absolute inset-1 rounded-full ${
+                          isRealtimeActive
+                            ? "bg-[#3C5C4E]/25 animate-pulse"
+                            : "bg-[#3C5C4E]/12"
+                        }`}
+                      />
+                      <span
+                        className={`relative flex size-7 items-center justify-center rounded-full ${
+                          isRealtimeActive
+                            ? "bg-[#3C5C4E] text-white shadow-[0_0_30px_rgba(60,92,78,0.35)]"
+                            : variant === "embedded"
+                              ? "bg-white/12 text-white/80"
+                              : "bg-[#3C5C4E]/14 text-[#3C5C4E]"
+                        }`}
+                      >
+                        <Mic className="size-3.5" />
+                      </span>
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`text-[11px] uppercase tracking-[0.22em] ${
+                            variant === "embedded" ? "text-white/55" : "text-[#3C5C4E]/80"
+                          }`}
+                        >
+                          Briefly voice
+                        </span>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] ${
+                            isListening
+                              ? "bg-[#3C5C4E] text-white"
+                              : variant === "embedded"
+                                ? "bg-white/10 text-white/70"
+                                : "bg-[#3C5C4E]/10 text-[#3C5C4E]"
+                          }`}
+                        >
+                          {isListening ? "Lytter nu" : isRealtimeActive ? "Samtale aktiv" : "Klar til samtale"}
+                        </span>
+                      </div>
+                      <p
+                        className={`mt-1 text-sm leading-6 ${
+                          variant === "embedded" ? "text-white/70" : "text-foreground/70"
+                        }`}
+                      >
+                        {isRealtimeActive
+                          ? "Tal frit. Briefly kan stille ét kort opfølgende spørgsmål og handle bagefter."
+                          : "Skriv en besked, eller start en levende samtale med Briefly."}
+                      </p>
+                    </div>
+
+                    <div className="hidden items-end gap-1 self-stretch sm:flex">
+                      {[0, 1, 2, 3].map((index) => (
+                        <span
+                          key={index}
+                        className={`w-1 rounded-full bg-[#3C5C4E] transition-all ${
+                            isListening
+                              ? index % 2 === 0
+                                ? "h-8 animate-pulse opacity-100"
+                                : "h-5 animate-bounce opacity-85"
+                              : index % 2 === 0
+                                ? "h-3 opacity-45"
+                                : "h-5 opacity-65"
+                          }`}
+                          style={
+                            isRealtimeActive
+                              ? {
+                                  animationDelay: `${index * 120}ms`,
+                                  animationDuration: `${900 + index * 120}ms`,
+                                }
+                              : undefined
+                          }
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <textarea
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  placeholder="Skriv det du vil have Briefly til at gøre"
+                  rows={4}
+                  className={
+                    variant === "embedded"
+                      ? "min-h-40 w-full resize-none rounded-[22px] border border-transparent bg-white/95 px-4 pb-4 pt-24 text-sm leading-7 text-foreground outline-none transition focus:border-white/20 focus:ring-2 focus:ring-white/10"
+                      : "min-h-40 w-full resize-none rounded-[22px] border border-transparent bg-white px-4 pb-4 pt-24 text-sm leading-7 text-foreground outline-none transition focus:border-[#3C5C4E] focus:ring-2 focus:ring-[#3C5C4E]/10"
+                  }
+                />
+              </div>
             </label>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
@@ -849,13 +727,13 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
                   <p className={variant === "embedded" ? "text-xs leading-6 text-[#8bd1bb]" : "text-xs leading-6 text-[#205949]"}>{realtimeStatus}</p>
                 ) : voiceStatus ? (
                   <p className={variant === "embedded" ? "text-xs leading-6 text-[#8bd1bb]" : "text-xs leading-6 text-[#205949]"}>{voiceStatus}</p>
-                ) : speechRecognitionSupported ? (
+                ) : isRealtimeActive ? (
                   <p className={variant === "embedded" ? "text-xs leading-6 text-white/45" : "text-xs leading-6 text-muted-foreground"}>
-                    Tryk på mikrofonen og sig det højt i stedet for at skrive.
+                    Tal frit til Briefly. Du kan svare kort som “ja”, “nej”, “flyt den til klokken 19” eller “slet den”.
                   </p>
                 ) : (
                   <p className={variant === "embedded" ? "text-xs leading-6 text-white/45" : "text-xs leading-6 text-muted-foreground"}>
-                    Tale-til-tekst understøttes ikke i denne browser.
+                    Skriv din besked, eller tryk på Tal med Briefly for en rigtig samtale.
                   </p>
                 )}
               </div>
@@ -874,39 +752,19 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
                   }}
                   className={
                     isRealtimeActive
-                      ? "rounded-full bg-[#153d32] text-white hover:bg-[#205949]"
+                      ? "rounded-full bg-[#3C5C4E] text-white hover:bg-[#345045]"
                       : variant === "embedded"
                         ? "rounded-full border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white"
                         : "rounded-full"
                   }
                 >
                   {isRealtimePending ? <Loader2 className="size-4 animate-spin" /> : <Mic className="size-4" />}
-                  {isRealtimeActive ? "Afslut live stemme" : "Start live stemme"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!speechSynthesisSupported || isRealtimeActive}
-                  onClick={toggleAutoSpeak}
-                  className={variant === "embedded" ? "rounded-full border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white" : "rounded-full"}
-                >
-                  {autoSpeakEnabled ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-                  {autoSpeakEnabled ? "Stop stemmesvar" : "Stemmesvar"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!speechRecognitionSupported || isPending || isRealtimeActive}
-                  onClick={toggleVoiceInput}
-                  className={variant === "embedded" ? "rounded-full border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white" : "rounded-full"}
-                >
-                  {isListening ? <MicOff className="size-4" /> : <Mic className="size-4" />}
-                  {isListening ? "Stop lytning" : "Tal til Briefly"}
+                  {isRealtimeActive ? "Afslut samtale" : "Tal med Briefly"}
                 </Button>
                 <Button
                   type="submit"
                   disabled={!canSubmit}
-                  className="rounded-full bg-[#153d32] px-5 text-white hover:bg-[#205949]"
+                  className="rounded-full bg-[#3C5C4E] px-5 text-white hover:bg-[#345045]"
                 >
                   {isPending ? <Loader2 className="size-4 animate-spin" /> : null}
                   Send til Briefly

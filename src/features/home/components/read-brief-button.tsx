@@ -46,6 +46,7 @@ export function ReadBriefButton({ summary }: ReadBriefButtonProps) {
           },
           body: JSON.stringify({
             text: summary,
+            mode: "brief",
           }),
         });
 

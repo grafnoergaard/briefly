@@ -7,6 +7,16 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const requestSchema = z.object({
   message: z.string().trim().min(1).max(1000),
+  channel: z.enum(["text", "voice"]).optional(),
+  history: z
+    .array(
+      z.object({
+        role: z.enum(["assistant", "user"]),
+        content: z.string().trim().min(1).max(2000),
+      }),
+    )
+    .max(20)
+    .optional(),
 });
 
 export async function POST(request: Request) {
@@ -50,6 +60,8 @@ export async function POST(request: Request) {
     const result = await runLifeOsAssistantTurn({
       userId: user.id,
       message: parsedBody.data.message,
+      channel: parsedBody.data.channel,
+      history: parsedBody.data.history,
     });
 
     revalidatePath("/");

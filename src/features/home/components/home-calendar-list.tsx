@@ -8,6 +8,7 @@ import {
 import { da } from "date-fns/locale";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   getAppDateKey,
   isTodayInAppTimeZone,
@@ -19,6 +20,9 @@ import { formatCalendarEventDetail, formatEventTime, type CachedCalendarEvent } 
 
 type HomeCalendarListProps = {
   events: CachedCalendarEvent[];
+  allowDelete?: boolean;
+  deleteAction?: (formData: FormData) => void | Promise<void>;
+  redirectTo?: string;
 };
 
 type WeekGroup = {
@@ -38,7 +42,12 @@ type DayGroup = {
   events: CachedCalendarEvent[];
 };
 
-export function HomeCalendarList({ events }: HomeCalendarListProps) {
+export function HomeCalendarList({
+  events,
+  allowDelete = false,
+  deleteAction,
+  redirectTo = "/calendar",
+}: HomeCalendarListProps) {
   if (events.length === 0) {
     return (
       <div className="rounded-[26px] bg-muted/55 p-5 text-sm leading-7 text-muted-foreground">
@@ -115,6 +124,21 @@ export function HomeCalendarList({ events }: HomeCalendarListProps) {
                           {event.calendarName ?? "Google Kalender"}
                         </Badge>
                       </div>
+                      {allowDelete && deleteAction ? (
+                        <form action={deleteAction} className="mt-4 flex justify-end">
+                          <input type="hidden" name="redirectTo" value={redirectTo} />
+                          <input type="hidden" name="calendarId" value={event.calendarId} />
+                          <input type="hidden" name="eventId" value={event.sourceEventId} />
+                          <input type="hidden" name="title" value={event.title} />
+                          <Button
+                            type="submit"
+                            variant="outline"
+                            className="rounded-full border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                          >
+                            Slet aftale
+                          </Button>
+                        </form>
+                      ) : null}
                     </div>
                   ))}
                 </div>

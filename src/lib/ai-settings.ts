@@ -4,12 +4,18 @@ export type AiBriefSettings = {
   enabled: boolean;
   model: string;
   tone: string;
+  voice: string;
+  voiceSpeed: number;
+  voiceStyle: string;
 };
 
 export const DEFAULT_AI_BRIEF_SETTINGS: AiBriefSettings = {
   enabled: false,
   model: "gpt-5-mini",
   tone: "calm",
+  voice: "coral",
+  voiceSpeed: 1.16,
+  voiceStyle: "Varm, rolig, moderne og tydelig dansk stemme med naturlige pauser.",
 };
 
 export async function getAiBriefSettings(userId: string): Promise<AiBriefSettings> {
@@ -21,7 +27,7 @@ export async function getAiBriefSettings(userId: string): Promise<AiBriefSetting
 
   const { data } = await supabase
     .from("profiles")
-    .select("ai_brief_enabled, ai_brief_model, ai_brief_tone")
+    .select("ai_brief_enabled, ai_brief_model, ai_brief_tone, ai_voice_name, ai_voice_speed, ai_voice_style")
     .eq("id", userId)
     .maybeSingle();
 
@@ -29,6 +35,12 @@ export async function getAiBriefSettings(userId: string): Promise<AiBriefSetting
     enabled: data?.ai_brief_enabled ?? DEFAULT_AI_BRIEF_SETTINGS.enabled,
     model: data?.ai_brief_model ?? DEFAULT_AI_BRIEF_SETTINGS.model,
     tone: data?.ai_brief_tone ?? DEFAULT_AI_BRIEF_SETTINGS.tone,
+    voice: data?.ai_voice_name ?? DEFAULT_AI_BRIEF_SETTINGS.voice,
+    voiceSpeed:
+      typeof data?.ai_voice_speed === "number"
+        ? data.ai_voice_speed
+        : DEFAULT_AI_BRIEF_SETTINGS.voiceSpeed,
+    voiceStyle: data?.ai_voice_style ?? DEFAULT_AI_BRIEF_SETTINGS.voiceStyle,
   };
 }
 

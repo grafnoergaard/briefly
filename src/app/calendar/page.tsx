@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { deleteGoogleCalendarEventAction } from "@/app/calendar/actions";
 import { HomeCalendarList } from "@/features/home/components/home-calendar-list";
 import { AppFrame } from "@/features/navigation/components/app-frame";
 import { requireUser } from "@/lib/auth";
@@ -57,7 +58,12 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
                 Kalender-sync og skifter til rigtige aftaler, så snart første sync er kørt.
               </div>
             ) : null}
-            <HomeCalendarList events={calendarEvents} />
+            <HomeCalendarList
+              events={calendarEvents}
+              allowDelete
+              deleteAction={deleteGoogleCalendarEventAction}
+              redirectTo="/calendar"
+            />
           </div>
         </CardContent>
       </Card>

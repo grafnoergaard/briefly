@@ -23,6 +23,14 @@ export async function saveAiSettingsAction(formData: FormData) {
   const enabled = String(formData.get("enabled") ?? "") === "true";
   const model = String(formData.get("model") ?? "").trim() || "gpt-5-mini";
   const tone = String(formData.get("tone") ?? "").trim() || "calm";
+  const voice = String(formData.get("voice") ?? "").trim() || "coral";
+  const rawVoiceSpeed = Number(formData.get("voiceSpeed") ?? "");
+  const voiceSpeed = Number.isFinite(rawVoiceSpeed)
+    ? Math.min(2, Math.max(0.75, rawVoiceSpeed))
+    : 1.16;
+  const voiceStyle =
+    String(formData.get("voiceStyle") ?? "").trim() ||
+    "Varm, rolig, moderne og tydelig dansk stemme med naturlige pauser.";
 
   const { error } = await supabase
     .from("profiles")
@@ -30,6 +38,9 @@ export async function saveAiSettingsAction(formData: FormData) {
       ai_brief_enabled: enabled,
       ai_brief_model: model,
       ai_brief_tone: tone,
+      ai_voice_name: voice,
+      ai_voice_speed: voiceSpeed,
+      ai_voice_style: voiceStyle,
     })
     .eq("id", user.id);
 

@@ -73,3 +73,25 @@
     background: rgba(32, 89, 73, 0.18);
   }
 }
+
+@keyframes briefly-wave {
+  0%,
+  100% {
+    opacity: 0.22;
+    transform: scaleX(0.82);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes briefly-fade {
+  0%,
+  100% {
+    opacity: 0.42;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}

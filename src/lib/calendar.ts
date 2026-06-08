@@ -10,6 +10,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type CachedCalendarEvent = {
   id: string;
+  sourceEventId: string;
   title: string;
   startsAt: string;
   endsAt: string;
@@ -23,6 +24,7 @@ export type CachedCalendarEvent = {
 export async function getUpcomingCalendarEvents(
   userId: string,
   limit = 12,
+  daysAhead = 30,
 ): Promise<CachedCalendarEvent[]> {
   const supabase = await createSupabaseServerClient();
 
@@ -32,11 +34,11 @@ export async function getUpcomingCalendarEvents(
 
   const today = new Date();
   const windowStart = format(today, "yyyy-MM-dd'T'00:00:00xxx");
-  const windowEnd = format(addDays(today, 30), "yyyy-MM-dd'T'23:59:59xxx");
+  const windowEnd = format(addDays(today, daysAhead), "yyyy-MM-dd'T'23:59:59xxx");
 
   const { data, error } = await supabase
     .from("calendar_events_cache")
-    .select("id, title, starts_at, ends_at, calendar_id, location, description, is_all_day, payload")
+    .select("id, external_id, title, starts_at, ends_at, calendar_id, location, description, is_all_day, payload")
     .eq("profile_id", userId)
     .gte("starts_at", windowStart)
     .lte("starts_at", windowEnd)
@@ -49,6 +51,10 @@ export async function getUpcomingCalendarEvents(
 
   return data.map((event) => ({
     id: event.id,
+    sourceEventId:
+      typeof event.external_id === "string" && event.external_id.includes(":")
+        ? event.external_id.slice(event.external_id.indexOf(":") + 1)
+        : event.id,
     title: event.title,
     startsAt: event.starts_at,
     endsAt: event.ends_at,

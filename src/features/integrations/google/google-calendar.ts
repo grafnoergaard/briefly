@@ -4,12 +4,15 @@ import type { User } from "@supabase/supabase-js";
 import { createSupabaseAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import { getValidGoogleAccessToken } from "@/features/integrations/google/google-auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getAppDateKey } from "@/lib/date-context";
 
 const GOOGLE_PROVIDER = "google";
 const GOOGLE_CALENDAR_PROVIDER = "google_calendar";
 const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
 const PREFERRED_GOOGLE_CALENDAR_NAME = "Vores kalender";
 const DEFAULT_EVENT_DURATION_MINUTES = 60;
+const CALENDAR_SYNC_WINDOW_DAYS_AHEAD = 365;
+const CALENDAR_SYNC_WINDOW_DAYS_BACK = 7;
 
 type CalendarSyncResult = {
   calendarNames: string[];
@@ -85,6 +88,12 @@ export type GoogleCalendarCreatedEvent = {
   title: string;
   startsAt: string;
   endsAt: string;
+};
+
+export type GoogleCalendarDeletedEvent = {
+  calendarId: string;
+  calendarName: string;
+  eventId: string;
 };
 
 export async function persistGoogleOAuthSession(params: {
@@ -192,8 +201,8 @@ export async function syncGooglePrimaryCalendar(userId: string): Promise<Calenda
   }
 
   const familyGroupId = await getPrimaryFamilyGroupId(userId);
-  const windowStart = subDays(new Date(), 1);
-  const windowEnd = addDays(new Date(), 30);
+  const windowStart = subDays(new Date(), CALENDAR_SYNC_WINDOW_DAYS_BACK);
+  const windowEnd = addDays(new Date(), CALENDAR_SYNC_WINDOW_DAYS_AHEAD);
   const availableCalendars = await fetchGoogleCalendarList(token);
   const selectedCalendars = await resolveSelectedGoogleCalendars(userId, availableCalendars);
 
@@ -344,6 +353,60 @@ export async function createGoogleCalendarEvent(
     title: createdEvent.summary ?? input.title,
     startsAt: createdEvent.start?.dateTime ?? createdEvent.start?.date ?? input.startsAt,
     endsAt: createdEvent.end?.dateTime ?? createdEvent.end?.date ?? input.endsAt,
+  };
+}
+
+export async function deleteGoogleCalendarEvent(input: {
+  userId: string;
+  calendarId: string;
+  eventId: string;
+}): Promise<GoogleCalendarDeletedEvent> {
+  if (!hasSupabaseAdminEnv()) {
+    throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY for secure Google Calendar writes.");
+  }
+
+  const token = await getValidGoogleAccessToken(input.userId, GOOGLE_CALENDAR_SCOPE);
+
+  if (!token) {
+    throw new Error("No Google provider token stored for this user.");
+  }
+
+  const availableCalendars = await fetchGoogleCalendarList(token);
+  const targetCalendar = availableCalendars.find((calendar) => calendar.id === input.calendarId);
+
+  if (!targetCalendar) {
+    throw new Error("Jeg kunne ikke finde den kalender, som aftalen ligger i.");
+  }
+
+  const response = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(input.calendarId)}/events/${encodeURIComponent(input.eventId)}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    },
+  );
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Aftalen findes ikke længere i Google Kalender.");
+    }
+
+    if (response.status === 403) {
+      throw new Error("Google Calendar write access is missing. Sign in with Google again to grant calendar editing.");
+    }
+
+    throw new Error(`Google Calendar delete event API returned ${response.status}.`);
+  }
+
+  await syncGooglePrimaryCalendar(input.userId);
+
+  return {
+    calendarId: input.calendarId,
+    calendarName: targetCalendar.summary ?? "Untitled calendar",
+    eventId: input.eventId,
   };
 }
 
@@ -635,11 +698,12 @@ function normalizeGoogleDate(input: string, shiftAllDayEnd: boolean) {
     return input;
   }
 
-  const date = new Date(`${input}T00:00:00.000Z`);
-
   if (shiftAllDayEnd) {
-    return formatISO(date);
+    const inclusiveEndDate = subDays(new Date(`${input}T00:00:00.000Z`), 1);
+    return formatISO(inclusiveEndDate);
   }
+
+  const date = new Date(`${input}T00:00:00.000Z`);
 
   return formatISO(date);
 }
@@ -648,8 +712,14 @@ function buildGoogleEventCreatePayload(input: GoogleCalendarCreateEventInput) {
   const isAllDay = Boolean(input.isAllDay);
 
   if (isAllDay) {
-    const startDate = input.startsAt.slice(0, 10);
-    const endDate = input.endsAt.slice(0, 10);
+    const startDate = getAppDateKey(input.startsAt);
+    const inclusiveEndDate = getAppDateKey(input.endsAt);
+    const exclusiveEndDate = addDays(
+      new Date(`${inclusiveEndDate}T00:00:00.000Z`),
+      1,
+    )
+      .toISOString()
+      .slice(0, 10);
 
     return {
       summary: input.title,
@@ -659,10 +729,7 @@ function buildGoogleEventCreatePayload(input: GoogleCalendarCreateEventInput) {
         date: startDate,
       },
       end: {
-        date:
-          endDate === startDate
-            ? addDays(new Date(`${startDate}T00:00:00.000Z`), 1).toISOString().slice(0, 10)
-            : endDate,
+        date: exclusiveEndDate,
       },
     };
   }

@@ -26,6 +26,18 @@ type SettingsPageProps = {
 
 const modelOptions = ["gpt-5-mini", "gpt-5", "gpt-5-nano"] as const;
 const toneOptions = ["calm", "crisp", "family-focused"] as const;
+const voiceOptions = [
+  { value: "coral", label: "Coral" },
+  { value: "marin", label: "Marin" },
+  { value: "sage", label: "Sage" },
+  { value: "cedar", label: "Cedar" },
+  { value: "alloy", label: "Alloy" },
+] as const;
+const voiceSpeedOptions = [
+  { value: "1", label: "Rolig" },
+  { value: "1.16", label: "Naturlig" },
+  { value: "1.26", label: "Kvikkere" },
+] as const;
 
 export default async function SettingsPage({ searchParams }: SettingsPageProps) {
   const user = await requireUser();
@@ -157,6 +169,56 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
                   ))}
                 </select>
               </label>
+
+              <div className="rounded-[22px] border border-border/70 p-4">
+                <p className="text-sm font-semibold">Stemme og oplæsning</p>
+                <p className="mt-2 text-sm leading-7 text-muted-foreground">
+                  De her indstillinger bruges både til `Tal med Briefly` og `Læs brief højt`, så
+                  Briefly lyder ens på tværs af hele appen.
+                </p>
+
+                <div className="mt-4 grid gap-5">
+                  <label className="grid gap-2 text-sm">
+                    <span className="font-medium">Stemme</span>
+                    <select
+                      name="voice"
+                      defaultValue={settings.voice}
+                      className="h-12 rounded-2xl border border-border bg-background px-4 text-sm outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
+                    >
+                      {voiceOptions.map((voice) => (
+                        <option key={voice.value} value={voice.value}>
+                          {voice.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="grid gap-2 text-sm">
+                    <span className="font-medium">Tempo</span>
+                    <select
+                      name="voiceSpeed"
+                      defaultValue={String(settings.voiceSpeed)}
+                      className="h-12 rounded-2xl border border-border bg-background px-4 text-sm outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
+                    >
+                      {voiceSpeedOptions.map((speed) => (
+                        <option key={speed.value} value={speed.value}>
+                          {speed.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="grid gap-2 text-sm">
+                    <span className="font-medium">Sprogprincipper for stemmen</span>
+                    <textarea
+                      name="voiceStyle"
+                      defaultValue={settings.voiceStyle}
+                      rows={4}
+                      className="rounded-[22px] border border-border bg-background px-4 py-3 text-sm leading-7 outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
+                    />
+                  </label>
+                </div>
+              </div>
 
               <div className="flex justify-end">
                 <button

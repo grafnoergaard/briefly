@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import {
+  deleteGoogleCalendarEvent,
   saveSelectedGoogleCalendars,
   syncGooglePrimaryCalendar,
 } from "@/features/integrations/google/google-calendar";
@@ -39,6 +40,28 @@ export async function saveGoogleCalendarSelectionAction(formData: FormData) {
   } catch (error) {
     redirectError(error, "Kunne ikke gemme valg af Google-kalendere.", redirectTo);
   }
+}
+
+export async function deleteGoogleCalendarEventAction(formData: FormData) {
+  const user = await requireActionUser();
+  const redirectTo = getRedirectTarget(formData.get("redirectTo"), "/calendar");
+  const calendarId = getRequiredString(formData.get("calendarId"));
+  const eventId = getRequiredString(formData.get("eventId"));
+  const title = getRequiredString(formData.get("title"), "Aftalen");
+  const successMessage = `Aftalen “${title}” er slettet fra kalenderen.`;
+
+  try {
+    await deleteGoogleCalendarEvent({
+      userId: user.id,
+      calendarId,
+      eventId,
+    });
+    revalidateCalendarViews();
+  } catch (error) {
+    redirectError(error, "Kunne ikke slette kalenderaftalen.", redirectTo);
+  }
+
+  redirectSuccess(successMessage, redirectTo);
 }
 
 async function requireActionUser() {
@@ -87,6 +110,18 @@ function getRedirectTarget(value: FormDataEntryValue | null, fallback: string) {
   }
 
   return value;
+}
+
+function getRequiredString(value: FormDataEntryValue | null, fallback?: string) {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+
+  if (fallback) {
+    return fallback;
+  }
+
+  throw new Error("Der mangler data til handlingen.");
 }
 
 function redirectSuccess(message: string, redirectTo = "/calendar"): never {
