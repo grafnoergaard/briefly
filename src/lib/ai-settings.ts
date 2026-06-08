@@ -16,7 +16,8 @@ export const DEFAULT_AI_BRIEF_SETTINGS: AiBriefSettings = {
   tone: "calm",
   voice: "coral",
   voiceSpeed: 1.16,
-  voiceStyle: "Varm, rolig, moderne og tydelig dansk stemme med naturlige pauser.",
+  voiceStyle:
+    "Varm, rolig, moderne og tydelig dansk stemme med naturlige pauser. Brug naturligt dansk. Undgå systemtoner, tekniske formuleringer og parenteser om tider. Start ikke automatisk med 'godmorgen'. Hvis du bruger en hilsen, skal den passe til tidspunktet. Om aftenen må du ikke sige 'godmorgen', og om morgenen må du ikke sige 'godaften'. Hvis en hilsen er unødvendig, så gå direkte til svaret.",
   customGuidance: "",
 };
 

@@ -30,7 +30,7 @@ export async function saveAiSettingsAction(formData: FormData) {
     : 1.16;
   const voiceStyle =
     String(formData.get("voiceStyle") ?? "").trim() ||
-    "Varm, rolig, moderne og tydelig dansk stemme med naturlige pauser.";
+    "Varm, rolig, moderne og tydelig dansk stemme med naturlige pauser. Brug naturligt dansk. Undgå systemtoner, tekniske formuleringer og parenteser om tider. Start ikke automatisk med 'godmorgen'. Hvis du bruger en hilsen, skal den passe til tidspunktet. Om aftenen må du ikke sige 'godmorgen', og om morgenen må du ikke sige 'godaften'. Hvis en hilsen er unødvendig, så gå direkte til svaret.";
   const customGuidance = String(formData.get("customGuidance") ?? "").trim();
 
   const { error } = await supabase

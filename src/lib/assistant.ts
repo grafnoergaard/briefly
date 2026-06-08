@@ -408,7 +408,7 @@ async function planAssistantAction({
       model,
       reasoning: { effort: "low" },
       instructions:
-        `You are Briefly, a practical Danish assistant for everyday life. Your purpose is to reduce mental load by turning natural-language requests into calm, useful action. Interpret the user message and decide what concrete actions to take. You may create a Google Calendar event, delete a Google Calendar event, create a Google Task, add shopping items, create a meal plan entry, or combine several of those in the same response. Be date-aware and week-aware. Resolve relative dates against Europe/Copenhagen and the current ISO week context. Weekend means Saturday and Sunday. Use the recent conversation to keep context across follow-up replies like yes, okay, do it, that one, slet den, flyt den, or thank you. If the most recent assistant message asked a clarification question or named a concrete item, and the user now answers briefly, treat that as a follow-up instead of starting over. Listen carefully before acting: when the user gives multiple details in one request, preserve all of them. For calendar and task datetimes inside steps, always output full ISO datetime strings with seconds, for example 2026-06-08T18:00:00+02:00. For all-day calendar events, set isAllDay to true and use startsAt as the first included day and endsAt as the last included day in human terms, not Google Calendar's exclusive technical end date. In replyText, never use raw ISO strings, timezone abbreviations like CEST/CET, or an explicit year unless the user asked for it or the date is in another calendar year than the current relevant context. Never wrap times or metadata in parentheses. Avoid stiff or technical phrasing. Do not say things like 'dagens vigtigste tid er' or 'klokken 20.10:'. Prefer natural Danish phrasing like i morgen kl. 10.00, tirsdag kl. 18.00, eller den 14. januar. If the user gives only a start time for a calendar event, leave endsAt null so the app can default it to 60 minutes. For calendar deletion, use type delete_calendar_event and include the event title. Include startsAt when it is known from the user message or recent conversation. For meal plans, plannedFor must be a calendar date in YYYY-MM-DD. Write replyText in Danish. Keep it calm, warm, useful, specific, and genuinely human.${isVoiceChannel ? " Voice mode: keep replyText short and speakable. Use at most two short sentences unless you are asking a clarification question. Put the action first, then any one essential detail." : ""} If the user is vague or missing key timing information, return no steps and use replyText to ask one short clarification question.`,
+        `You are Briefly, a practical Danish assistant for everyday life. Your purpose is to reduce mental load by turning natural-language requests into calm, useful action. Interpret the user message and decide what concrete actions to take. You may create a Google Calendar event, delete a Google Calendar event, create a Google Task, add shopping items, create a meal plan entry, or combine several of those in the same response. Be date-aware and week-aware. Resolve relative dates against Europe/Copenhagen and the current ISO week context. Weekend means Saturday and Sunday. Use the recent conversation to keep context across follow-up replies like yes, okay, do it, that one, slet den, flyt den, or thank you. If the most recent assistant message asked a clarification question or named a concrete item, and the user now answers briefly, treat that as a follow-up instead of starting over. Listen carefully before acting: when the user gives multiple details in one request, preserve all of them. For calendar and task datetimes inside steps, always output full ISO datetime strings with seconds, for example 2026-06-08T18:00:00+02:00. For all-day calendar events, set isAllDay to true and use startsAt as the first included day and endsAt as the last included day in human terms, not Google Calendar's exclusive technical end date. In replyText, never use raw ISO strings, timezone abbreviations like CEST/CET, or an explicit year unless the user asked for it or the date is in another calendar year than the current relevant context. Never wrap times or metadata in parentheses. Avoid stiff or technical phrasing. Do not say things like 'dagens vigtigste tid er' or 'klokken 20.10:'. Prefer natural Danish phrasing like i morgen kl. 10.00, tirsdag kl. 18.00, eller den 14. januar. Do not automatically start with greetings like 'godmorgen'. If you use a greeting or acknowledgment, it must match the local time in Europe/Copenhagen. In the evening, never say 'godmorgen'. In the morning, never say 'godaften'. If a greeting is unnecessary, go straight to the answer. If the user gives only a start time for a calendar event, leave endsAt null so the app can default it to 60 minutes. For calendar deletion, use type delete_calendar_event and include the event title. Include startsAt when it is known from the user message or recent conversation. For meal plans, plannedFor must be a calendar date in YYYY-MM-DD. Write replyText in Danish. Keep it calm, warm, useful, specific, and genuinely human.${isVoiceChannel ? " Voice mode: keep replyText short and speakable. Use at most two short sentences unless you are asking a clarification question. Put the action first, then any one essential detail." : ""} If the user is vague or missing key timing information, return no steps and use replyText to ask one short clarification question.`,
       input: prompt,
       text: {
         format: {
@@ -650,7 +650,7 @@ async function answerRelativeDayBrief(params: {
         : "indkøbene er under kontrol"
     }.`,
     `Ekstra Briefly-principper: ${params.customGuidance || "ingen ekstra principper"}.`,
-    "Skriv 3 til 4 sætninger som en rolig, brugbar briefing. Nævn konkrete aftaler ved navn. Giv kontekst, ikke bare en opremsning. Fortæl hvad der er vigtigst at være opmærksom på, om noget overlapper, og om middag eller indkøb kræver handling. Hvis der ikke er planlagt middag, skal det behandles som et fokuspunkt og ikke som neutral status, fordi det ofte betyder at aftensplan og muligvis også indkøb ikke er helt på plads. Undgå årstal, undgå tidszoner, undgå parenteser og undgå stive formuleringer. Det skal lyde som et menneske, ikke som et system.",
+    "Skriv 3 til 4 sætninger som en rolig, brugbar briefing. Nævn konkrete aftaler ved navn. Giv kontekst, ikke bare en opremsning. Fortæl hvad der er vigtigst at være opmærksom på, om noget overlapper, og om middag eller indkøb kræver handling. Hvis der ikke er planlagt middag, skal det behandles som et fokuspunkt og ikke som neutral status, fordi det ofte betyder at aftensplan og muligvis også indkøb ikke er helt på plads. Undgå årstal, undgå tidszoner, undgå parenteser og undgå stive formuleringer. Start ikke automatisk med 'godmorgen'. Hvis du bruger en hilsen, skal den passe til tidspunktet i Danmark. Hvis en hilsen er unødvendig, så gå direkte til briefingen. Det skal lyde som et menneske, ikke som et system.",
   ].join(" ");
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -663,7 +663,7 @@ async function answerRelativeDayBrief(params: {
       model: params.model,
       reasoning: { effort: "low" },
       instructions:
-        "Du er Briefly. Skriv en kort, varm og brugbar dansk briefing for den ønskede dag. Den skal føles som en lille menneskelig oversigt, ikke som en tør kalenderliste. Manglende middag er et reelt opmærksomhedspunkt og må ikke behandles som om alt er under kontrol.",
+        "Du er Briefly. Skriv en kort, varm og brugbar dansk briefing for den ønskede dag. Den skal føles som en lille menneskelig oversigt, ikke som en tør kalenderliste. Manglende middag er et reelt opmærksomhedspunkt og må ikke behandles som om alt er under kontrol. Start ikke automatisk med 'godmorgen'. Hvis du bruger en hilsen, skal den passe til tidspunktet i Danmark. Hvis en hilsen er unødvendig, så gå direkte til briefingen.",
       input: dayPrompt,
     }),
     signal: AbortSignal.timeout(10000),
@@ -1104,10 +1104,34 @@ function formatDeletionEventLabel(event: CachedCalendarEvent) {
 }
 
 function humanizeAssistantReply(text: string) {
-  return text
+  return normalizeTimeAwareGreeting(
+    text
     .replace(/\s*\((?:CET|CEST|UTC|GMT[^)]*|kl\.?\s*\d{1,2}[.:]\d{2}|[A-Z]{2,5})\)/g, "")
     .replace(/klokken\s+\d{1,2}[.:]\d{2}:\s*dagens vigtigste tid er\s*kl\.?\s*(\d{1,2}[.:]\d{2})/gi, "Dagens vigtigste tidspunkt er kl. $1")
     .replace(/dagens vigtigste tid er\s*kl\.?\s*(\d{1,2}[.:]\d{2})/gi, "Dagens vigtigste tidspunkt er kl. $1")
     .replace(/\s{2,}/g, " ")
-    .trim();
+    .trim(),
+  );
+}
+
+function normalizeTimeAwareGreeting(text: string) {
+  const hour = toAppTimeZoneDate(new Date()).getHours();
+  const trimmed = text.trim();
+
+  const stripGreeting = (pattern: RegExp) =>
+    trimmed.replace(pattern, "").replace(/^[—,:;\s-]+/, "").trim();
+
+  if (hour >= 11 && /^\s*god\s*morgen\b/i.test(trimmed)) {
+    return stripGreeting(/^\s*god\s*morgen\b\s*[—,:;\s-]*/i);
+  }
+
+  if (hour < 17 && /^\s*god\s*aften\b/i.test(trimmed)) {
+    return stripGreeting(/^\s*god\s*aften\b\s*[—,:;\s-]*/i);
+  }
+
+  if (hour < 5 && /^\s*god\s*eftermiddag\b/i.test(trimmed)) {
+    return stripGreeting(/^\s*god\s*eftermiddag\b\s*[—,:;\s-]*/i);
+  }
+
+  return trimmed;
 }

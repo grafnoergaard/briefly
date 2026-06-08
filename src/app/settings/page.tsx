@@ -214,6 +214,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
                       name="voiceStyle"
                       defaultValue={settings.voiceStyle}
                       rows={4}
+                      placeholder="Varm, rolig og tydelig dansk stemme. Brug naturligt dansk. Start ikke automatisk med 'godmorgen'. Hvis du bruger en hilsen, skal den passe til tidspunktet. Om aftenen må du ikke sige 'godmorgen', og om morgenen må du ikke sige 'godaften'. Hvis en hilsen er unødvendig, så gå direkte til svaret."
                       className="rounded-[22px] border border-border bg-background px-4 py-3 text-sm leading-7 outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
                     />
                   </label>
