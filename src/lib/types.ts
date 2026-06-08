@@ -189,4 +189,5 @@ export type ShoppingListEntry = {
   mealPlanId: string | null;
   sortIndex: number;
   shoppingListId: string;
+  addedByName?: string | null;
 };

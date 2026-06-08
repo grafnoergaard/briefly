@@ -87,7 +87,7 @@ export async function getFamilyWorkspaceData(
   const resolvedShoppingResult = isLegacyShoppingListId(activeShoppingList?.id)
     ? await supabase
         .from("shopping_items")
-        .select("id, label, quantity, category, is_completed, meal_plan_id, sort_index")
+        .select("id, label, quantity, category, is_completed, meal_plan_id, sort_index, added_by")
         .eq("family_group_id", familyGroupId)
         .order("is_completed", { ascending: true })
         .order("sort_index", { ascending: true })
@@ -95,13 +95,34 @@ export async function getFamilyWorkspaceData(
         .limit(50)
     : await supabase
         .from("shopping_items")
-        .select("id, label, quantity, category, is_completed, meal_plan_id, sort_index, shopping_list_id")
+        .select("id, label, quantity, category, is_completed, meal_plan_id, sort_index, shopping_list_id, added_by")
         .eq("family_group_id", familyGroupId)
         .eq("shopping_list_id", activeShoppingList?.id ?? "")
       .order("is_completed", { ascending: true })
       .order("sort_index", { ascending: true })
       .order("created_at", { ascending: true })
       .limit(50);
+
+  const shoppingRows = ((resolvedShoppingResult.data as Array<Record<string, unknown>> | null) ?? []);
+  const addedByIds = [
+    ...new Set(
+      shoppingRows
+        .map((item) => item.added_by)
+        .filter((value): value is string => typeof value === "string"),
+    ),
+  ];
+  const addedByNameMap = new Map<string, string | null>();
+
+  if (addedByIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", addedByIds);
+
+    for (const profile of profiles ?? []) {
+      addedByNameMap.set(profile.id, profile.full_name ?? profile.email ?? null);
+    }
+  }
 
   return {
     familyGroupId,
@@ -122,7 +143,7 @@ export async function getFamilyWorkspaceData(
       plannedFor: plan.planned_for,
       notes: plan.notes,
     })),
-    shoppingItems: ((resolvedShoppingResult.data as Array<Record<string, unknown>> | null) ?? []).map((item) => ({
+    shoppingItems: shoppingRows.map((item) => ({
       id: String(item.id ?? ""),
       label: String(item.label ?? ""),
       quantity: (item.quantity as string | null) ?? null,
@@ -134,6 +155,10 @@ export async function getFamilyWorkspaceData(
         (item.shopping_list_id as string | undefined) ??
         activeShoppingList?.id ??
         LEGACY_SHOPPING_LIST_ID,
+      addedByName:
+        typeof item.added_by === "string"
+          ? addedByNameMap.get(item.added_by) ?? null
+          : null,
     })),
   };
 }

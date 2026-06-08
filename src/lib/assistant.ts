@@ -123,7 +123,7 @@ export async function runLifeOsAssistantTurn(params: {
       getAiBriefSettings(params.userId),
       getDashboardSnapshot(params.userId),
       getUpcomingCalendarEvents(params.userId, 200, 180),
-      getOpenTasks(params.userId, 6),
+      getOpenTasks(params.userId, 50),
       getFamilyWorkspaceData(params.userId),
       getGoogleCalendarChoices(params.userId),
     ]);
@@ -242,6 +242,7 @@ export async function runLifeOsAssistantTurn(params: {
 
   const user = await requireAssistantUser();
   const completedActions: string[] = [];
+  const assistantNotes: string[] = [];
   let createdEventSummary: AssistantTurnResult["createdEvent"] = null;
 
   for (const step of parsed.steps) {
@@ -255,6 +256,12 @@ export async function runLifeOsAssistantTurn(params: {
           completedActions,
         };
       }
+
+      const conflictingEvents = findCalendarConflicts(calendarEvents, {
+        startsAt: step.startsAt,
+        endsAt: step.endsAt ?? addDefaultEventDuration(step.startsAt),
+        isAllDay: step.isAllDay,
+      });
 
       const endsAt = step.endsAt ?? addDefaultEventDuration(step.startsAt);
       const createdEvent = await createGoogleCalendarEvent({
@@ -280,6 +287,17 @@ export async function runLifeOsAssistantTurn(params: {
         timeLabel,
       };
       completedActions.push(`Calendar · ${createdEvent.title} · ${timeLabel}`);
+
+      if (conflictingEvents.length > 0) {
+        assistantNotes.push(
+          `Den ligger oven i ${conflictingEvents
+            .slice(0, 2)
+            .map((event) => `${event.title} kl. ${formatAppTime(event.startsAt)}`)
+            .join(" og ")}.`,
+        );
+      } else {
+        assistantNotes.push("Der var plads i kalenderen uden overlap.");
+      }
       continue;
     }
 
@@ -326,6 +344,15 @@ export async function runLifeOsAssistantTurn(params: {
     }
 
     if (step.type === "create_task") {
+      const existingTask = findExistingTask(tasks, step.title);
+
+      if (existingTask) {
+        assistantNotes.push(
+          `To-do'en “${existingTask.title}” findes allerede${existingTask.taskListTitle ? ` i ${existingTask.taskListTitle}` : ""}.`,
+        );
+        continue;
+      }
+
       const createdTask = await createGoogleTask({
         userId: params.userId,
         title: step.title,
@@ -335,16 +362,39 @@ export async function runLifeOsAssistantTurn(params: {
       completedActions.push(
         `Task · ${createdTask.title}${createdTask.taskListTitle ? ` · ${createdTask.taskListTitle}` : ""}`,
       );
+      assistantNotes.push(`Jeg har lagt to-do'en “${createdTask.title}” ind.`);
       continue;
     }
 
     if (step.type === "add_shopping_items") {
+      const { newItems, duplicates } = splitShoppingItemsAgainstExisting(
+        familyWorkspace.shoppingItems,
+        step.items,
+      );
+
+      if (duplicates.length > 0) {
+        assistantNotes.push(
+          duplicates
+            .map((item) =>
+              `${item.label} findes allerede${item.addedByName ? ` og er lagt ind af ${item.addedByName}` : ""}.`,
+            )
+            .join(" "),
+        );
+      }
+
+      if (newItems.length === 0) {
+        continue;
+      }
+
       const addedShoppingItems = await addShoppingItems({
         user,
-        items: step.items,
+        items: newItems,
       });
       completedActions.push(
         `Shopping · ${addedShoppingItems.items.map((item) => item.label).join(", ")}`,
+      );
+      assistantNotes.push(
+        `Jeg har tilføjet ${addedShoppingItems.items.map((item) => item.label).join(", ")} til indkøbslisten.`,
       );
       continue;
     }
@@ -360,11 +410,14 @@ export async function runLifeOsAssistantTurn(params: {
       completedActions.push(
         `Meal plan · ${createdMeal.title} · ${createdMeal.plannedFor}${createdMeal.linkedShoppingCount > 0 ? ` · ${createdMeal.linkedShoppingCount} linked shopping items` : ""}`,
       );
+      assistantNotes.push(`Jeg har lagt ${createdMeal.title} på madplanen.`);
     }
   }
 
+  const reply = buildActionAwareReply(parsed.replyText, assistantNotes);
+
   return {
-    reply: humanizeAssistantReply(parsed.replyText),
+    reply: humanizeAssistantReply(reply),
     action: parsed.steps[0]?.type ?? "reply",
     createdEvent: createdEventSummary,
     completedActions,
@@ -731,6 +784,22 @@ function resolveRelativeDayBriefTarget(message: string) {
   return null;
 }
 
+function buildActionAwareReply(replyText: string, assistantNotes: string[]) {
+  const cleanedReply = replyText.trim();
+
+  if (assistantNotes.length === 0) {
+    return cleanedReply;
+  }
+
+  const uniqueNotes = [...new Set(assistantNotes.map((note) => note.trim()).filter(Boolean))];
+
+  if (!cleanedReply) {
+    return uniqueNotes.join(" ");
+  }
+
+  return `${cleanedReply} ${uniqueNotes.join(" ")}`.trim();
+}
+
 function findEventOverlaps(events: CachedCalendarEvent[]) {
   const overlaps: Array<{
     firstTitle: string;
@@ -758,6 +827,32 @@ function findEventOverlaps(events: CachedCalendarEvent[]) {
   }
 
   return overlaps;
+}
+
+function findCalendarConflicts(
+  events: CachedCalendarEvent[],
+  target: {
+    startsAt: string;
+    endsAt: string;
+    isAllDay: boolean;
+  },
+) {
+  if (target.isAllDay) {
+    return [];
+  }
+
+  const targetStart = new Date(target.startsAt).getTime();
+  const targetEnd = new Date(target.endsAt).getTime();
+
+  return events.filter((event) => {
+    if (event.isAllDay) {
+      return false;
+    }
+
+    const eventStart = new Date(event.startsAt).getTime();
+    const eventEnd = new Date(event.endsAt).getTime();
+    return targetStart < eventEnd && targetEnd > eventStart;
+  });
 }
 
 function buildFallbackDayBrief(params: {
@@ -949,6 +1044,50 @@ function extractCalendarSearchTokens(message: string) {
   return normalizeMatchText(message)
     .split(" ")
     .filter((token) => token.length > 1 && !stopWords.has(token));
+}
+
+function findExistingTask(tasks: CachedTask[], title: string) {
+  const normalizedTitle = normalizeMatchText(title);
+
+  return tasks.find((task) => normalizeMatchText(task.title) === normalizedTitle) ?? null;
+}
+
+function splitShoppingItemsAgainstExisting(
+  shoppingItems: ShoppingListEntry[],
+  items: Array<{
+    label: string;
+    quantity?: string | null;
+    category?: string | null;
+  }>,
+) {
+  const existingOpenItems = shoppingItems.filter((item) => !item.isCompleted);
+  const duplicates: Array<{
+    label: string;
+    addedByName: string | null;
+  }> = [];
+  const newItems: typeof items = [];
+
+  for (const item of items) {
+    const normalizedLabel = normalizeMatchText(item.label);
+    const existingItem =
+      existingOpenItems.find((openItem) => normalizeMatchText(openItem.label) === normalizedLabel) ??
+      null;
+
+    if (existingItem) {
+      duplicates.push({
+        label: existingItem.label,
+        addedByName: existingItem.addedByName ?? null,
+      });
+      continue;
+    }
+
+    newItems.push(item);
+  }
+
+  return {
+    newItems,
+    duplicates,
+  };
 }
 
 function scoreCalendarEventMatch(event: CachedCalendarEvent, queryTokens: string[]) {

@@ -370,6 +370,76 @@ export async function moveShoppingItemAction(formData: FormData) {
   redirect(redirectTo);
 }
 
+export async function reorderShoppingItemsAction(formData: FormData) {
+  const { supabase, familyGroupId } = await requireFamilyActionContext();
+  const orderedIdsRaw = String(formData.get("orderedIds") ?? "").trim();
+  const shoppingListId = String(formData.get("shoppingListId") ?? "").trim();
+
+  if (!orderedIdsRaw) {
+    throw new Error("Der mangler en ny rækkefølge.");
+  }
+
+  let orderedIds: string[] = [];
+
+  try {
+    const parsed = JSON.parse(orderedIdsRaw) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      throw new Error("Ugyldig rækkefølge.");
+    }
+
+    orderedIds = parsed.filter((value): value is string => typeof value === "string" && value.length > 0);
+  } catch {
+    throw new Error("Ugyldig rækkefølge.");
+  }
+
+  if (orderedIds.length === 0) {
+    throw new Error("Rækkefølgen var tom.");
+  }
+
+  const selectQuery = supabase
+    .from("shopping_items")
+    .select("id")
+    .eq("family_group_id", familyGroupId)
+    .eq("is_completed", false)
+    .order("sort_index", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  const { data: existingItems, error } = isLegacyShoppingListId(shoppingListId)
+    ? await selectQuery
+    : await selectQuery.eq("shopping_list_id", shoppingListId);
+
+  if (error || !existingItems) {
+    throw new Error(error?.message ?? "Kunne ikke læse indkøbslisten.");
+  }
+
+  const existingIds = existingItems.map((item) => item.id);
+
+  if (
+    existingIds.length !== orderedIds.length ||
+    existingIds.some((id) => !orderedIds.includes(id))
+  ) {
+    throw new Error("Indkøbslisten ændrede sig, mens du sorterede. Prøv igen.");
+  }
+
+  for (let index = 0; index < orderedIds.length; index += 1) {
+    const itemId = orderedIds[index];
+    const nextSortIndex = (index + 1) * 100;
+    const { error: updateError } = await supabase
+      .from("shopping_items")
+      .update({ sort_index: nextSortIndex })
+      .eq("id", itemId);
+
+    if (updateError) {
+      throw new Error(updateError.message);
+    }
+  }
+
+  revalidateFamilyViews();
+
+  return { ok: true };
+}
+
 export async function clearCompletedShoppingItemsAction(formData: FormData) {
   const { supabase, familyGroupId } = await requireFamilyActionContext();
   const redirectTo = getRedirectTarget(formData, "/shopping");
