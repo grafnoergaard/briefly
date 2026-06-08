@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { getAiBriefSettings } from "@/lib/ai-settings";
 import { getUpcomingCalendarEvents, type CachedCalendarEvent } from "@/lib/calendar";
-import { getCurrentDateContext } from "@/lib/date-context";
+import { getCurrentDateContext, normalizeToAppTimeZoneIsoDateTime } from "@/lib/date-context";
 import { getDashboardSnapshot } from "@/lib/dashboard";
 import {
   addShoppingItems,
@@ -25,8 +25,8 @@ const assistantStepSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("create_calendar_event"),
     title: z.string().min(1),
-    startsAt: z.string().datetime(),
-    endsAt: z.string().datetime().nullable(),
+    startsAt: z.string().transform(normalizeToAppTimeZoneIsoDateTime),
+    endsAt: z.string().transform(normalizeToAppTimeZoneIsoDateTime).nullable(),
     isAllDay: z.boolean().default(false),
     description: z.string().nullable().default(null),
     location: z.string().nullable().default(null),
@@ -35,7 +35,7 @@ const assistantStepSchema = z.discriminatedUnion("type", [
     type: z.literal("create_task"),
     title: z.string().min(1),
     notes: z.string().nullable().default(null),
-    dueAt: z.string().datetime().nullable(),
+    dueAt: z.string().transform(normalizeToAppTimeZoneIsoDateTime).nullable(),
   }),
   z.object({
     type: z.literal("add_shopping_items"),
@@ -305,7 +305,7 @@ async function planAssistantAction({
       model,
       reasoning: { effort: "low" },
       instructions:
-        "You are Briefly, a practical Danish assistant for everyday life. Your purpose is to reduce mental load by turning natural-language requests into calm, useful action. Interpret the user message and decide what concrete actions to take. You may create a Google Calendar event, create a Google Task, add shopping items, create a meal plan entry, or combine several of those in the same response. Be date-aware and week-aware. Resolve relative dates against Europe/Copenhagen and the current ISO week context. Weekend means Saturday and Sunday. If the user gives only a start time for a calendar event, leave endsAt null so the app can default it to 60 minutes. For meal plans, plannedFor must be a calendar date in YYYY-MM-DD. Write replyText in Danish. Keep it calm, warm, useful, and specific. If the user is vague or missing key timing information, return no steps and use replyText to ask one short clarification question.",
+        "You are Briefly, a practical Danish assistant for everyday life. Your purpose is to reduce mental load by turning natural-language requests into calm, useful action. Interpret the user message and decide what concrete actions to take. You may create a Google Calendar event, create a Google Task, add shopping items, create a meal plan entry, or combine several of those in the same response. Be date-aware and week-aware. Resolve relative dates against Europe/Copenhagen and the current ISO week context. Weekend means Saturday and Sunday. For calendar and task datetimes, always output full ISO datetime strings with seconds, for example 2026-06-08T18:00:00+02:00. If the user gives only a start time for a calendar event, leave endsAt null so the app can default it to 60 minutes. For meal plans, plannedFor must be a calendar date in YYYY-MM-DD. Write replyText in Danish. Keep it calm, warm, useful, and specific. If the user is vague or missing key timing information, return no steps and use replyText to ask one short clarification question.",
       input: prompt,
       text: {
         format: {

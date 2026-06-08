@@ -12,6 +12,40 @@ import { da } from "date-fns/locale";
 
 export const APP_TIME_ZONE = "Europe/Copenhagen";
 
+function parseOffsetLabelToMinutes(label: string) {
+  const normalized = label.replace("GMT", "");
+
+  if (normalized === "" || normalized === "Z") {
+    return 0;
+  }
+
+  const match = normalized.match(/^([+-])(\d{1,2})(?::?(\d{2}))?$/);
+
+  if (!match) {
+    return 0;
+  }
+
+  const [, sign, hours, minutes] = match;
+  const totalMinutes = Number(hours) * 60 + Number(minutes ?? "0");
+
+  return sign === "-" ? -totalMinutes : totalMinutes;
+}
+
+function getTimeZoneOffsetMinutes(date: Date, timeZone = APP_TIME_ZONE) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "longOffset",
+    hourCycle: "h23",
+  });
+  const parts = formatter.formatToParts(date);
+  const offsetLabel = parts.find((part) => part.type === "timeZoneName")?.value ?? "GMT";
+
+  return parseOffsetLabelToMinutes(offsetLabel);
+}
+
 type TimeZoneParts = {
   year: string;
   month: string;
@@ -101,4 +135,57 @@ export function getCurrentDateContext(now = new Date()) {
     dateLabel: `${format(today, "EEEE dd MMMM", { locale: da })} · Uge ${isoWeek}`,
     fullDateLabel: `${format(today, "EEEE dd MMMM yyyy", { locale: da })} · Uge ${isoWeek}`,
   };
+}
+
+export function normalizeToAppTimeZoneIsoDateTime(input: string) {
+  const trimmed = input.trim();
+
+  if (!trimmed) {
+    throw new Error("Tidspunktet mangler.");
+  }
+
+  if (/[zZ]$|[+-]\d{2}:\d{2}$/.test(trimmed)) {
+    const withOffset = new Date(trimmed);
+
+    if (Number.isNaN(withOffset.getTime())) {
+      throw new Error("Tidspunktet kunne ikke fortolkes.");
+    }
+
+    return withOffset.toISOString();
+  }
+
+  const match = trimmed.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?$/,
+  );
+
+  if (!match) {
+    throw new Error("Tidspunktet skal være et gyldigt dato-klokkeslæt.");
+  }
+
+  const [, year, month, day, hour, minute, second] = match;
+  const utcGuess = new Date(
+    Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second ?? "0"),
+    ),
+  );
+
+  let offsetMinutes = getTimeZoneOffsetMinutes(utcGuess);
+  let adjusted = new Date(utcGuess.getTime() - offsetMinutes * 60_000);
+  const recalculatedOffsetMinutes = getTimeZoneOffsetMinutes(adjusted);
+
+  if (recalculatedOffsetMinutes !== offsetMinutes) {
+    offsetMinutes = recalculatedOffsetMinutes;
+    adjusted = new Date(utcGuess.getTime() - offsetMinutes * 60_000);
+  }
+
+  if (Number.isNaN(adjusted.getTime())) {
+    throw new Error("Tidspunktet kunne ikke fortolkes.");
+  }
+
+  return adjusted.toISOString();
 }
