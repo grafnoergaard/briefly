@@ -56,7 +56,7 @@ export default async function ShoppingPage({ searchParams }: ShoppingPageProps) 
                 <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
                   Indkøb
                 </p>
-                <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em]">
+                <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-foreground">
                   Brug den visning, du har brug for lige nu
                 </h1>
                 <p className="mt-2 text-sm leading-7 text-muted-foreground">
@@ -93,7 +93,7 @@ export default async function ShoppingPage({ searchParams }: ShoppingPageProps) 
                   <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
                     Tilføj ny vare
                   </p>
-                  <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em]">
+                  <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-foreground">
                     Læg nye varer ind
                   </h2>
                   <p className="mt-2 text-sm leading-7 text-muted-foreground">
@@ -118,7 +118,7 @@ export default async function ShoppingPage({ searchParams }: ShoppingPageProps) 
                   <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
                     Indkøbslister
                   </p>
-                  <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em]">
+                  <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-foreground">
                     Skift eller opret en liste
                   </h2>
                   <p className="mt-2 text-sm leading-7 text-muted-foreground">
@@ -150,7 +150,7 @@ export default async function ShoppingPage({ searchParams }: ShoppingPageProps) 
                     type="text"
                     required
                     placeholder="Nyt listenavn, fx: Studenterfest"
-                    className="h-12 flex-1 rounded-2xl border border-border bg-background px-4 text-sm outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
+                    className="h-12 flex-1 rounded-2xl border border-border bg-background px-4 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
                   />
                   <button
                     type="submit"
@@ -169,7 +169,7 @@ export default async function ShoppingPage({ searchParams }: ShoppingPageProps) 
                 <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
                   Handlevisning
                 </p>
-                <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em]">
+                <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-foreground">
                   Brug listen i butikken
                 </h2>
                 <p className="mt-2 text-sm leading-7 text-muted-foreground">

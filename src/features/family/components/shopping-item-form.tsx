@@ -26,8 +26,8 @@ export function ShoppingItemForm({
       action={addShoppingItemAction}
       className={
         compact
-          ? "grid gap-3"
-          : "rounded-[26px] border border-border/70 bg-white/85 p-5 shadow-[0_24px_60px_-44px_rgba(17,24,39,0.45)]"
+          ? "grid gap-3 text-foreground"
+          : "rounded-[26px] border border-border/70 bg-white/85 p-5 text-foreground shadow-[0_24px_60px_-44px_rgba(17,24,39,0.45)]"
       }
     >
       <input type="hidden" name="redirectTo" value={redirectTo} />
@@ -36,7 +36,7 @@ export function ShoppingItemForm({
       <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
         {compact ? "Opskriftsindkøb" : "Ny vare"}
       </p>
-      <h2 className={`mt-2 font-semibold tracking-[-0.04em] ${compact ? "text-base" : "text-2xl"}`}>
+      <h2 className={`mt-2 font-semibold tracking-[-0.04em] text-foreground ${compact ? "text-base" : "text-2xl"}`}>
         {compact ? `Tilføj ingredienser til ${defaultMealPlanLabel ?? "denne ret"}` : "Tilføj hurtigt, sorter smart"}
       </h2>
       <p className="mt-2 text-sm leading-7 text-muted-foreground">
@@ -50,18 +50,18 @@ export function ShoppingItemForm({
           type="text"
           required
           placeholder={compact ? "Fx: Kylling, parmesan, romainesalat" : "Fx: Mælk, gulerødder, toiletpapir"}
-          className="h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
+          className="h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
         />
         <input
           name="quantity"
           type="text"
           placeholder="Mængde"
-          className="h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
+          className="h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
         />
         <select
           name="category"
           defaultValue=""
-          className="h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
+          className="h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm text-foreground outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
         >
           <option value="">Find butikszone automatisk</option>
           {SHOPPING_CATEGORY_OPTIONS.map((option) => (
@@ -74,7 +74,7 @@ export function ShoppingItemForm({
           <select
             name="mealPlanId"
             defaultValue=""
-            className="h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
+            className="h-12 w-full rounded-2xl border border-border bg-background px-4 text-sm text-foreground outline-none transition focus:border-[#205949] focus:ring-2 focus:ring-[#205949]/10"
           >
             <option value="">Ikke knyttet til en ret</option>
             {mealPlans.map((mealPlan) => (
