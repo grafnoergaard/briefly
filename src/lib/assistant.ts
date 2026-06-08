@@ -1,4 +1,4 @@
-import { format } from "date-fns";
+import { addDays, format } from "date-fns";
 import { da } from "date-fns/locale";
 import { z } from "zod";
 
@@ -194,11 +194,28 @@ export async function runLifeOsAssistantTurn(params: {
     `User message: ${params.message}`,
   ].join(" ");
 
+  const dayBrief = await answerRelativeDayBrief({
+    message: params.message,
+    model: settings.model,
+    calendarEvents,
+    tasks,
+    familyWorkspace,
+  });
+
+  if (dayBrief) {
+    return {
+      reply: humanizeAssistantReply(dayBrief),
+      action: "reply",
+      createdEvent: null,
+      completedActions: [],
+    };
+  }
+
   const calendarLookup = answerCalendarLookupFromCache(params.message, calendarEvents);
 
   if (calendarLookup) {
     return {
-      reply: calendarLookup.reply,
+      reply: humanizeAssistantReply(calendarLookup.reply),
       action: calendarLookup.action,
       createdEvent: null,
       completedActions: [],
@@ -213,7 +230,7 @@ export async function runLifeOsAssistantTurn(params: {
 
   if (parsed.steps.length === 0) {
     return {
-      reply: parsed.replyText,
+      reply: humanizeAssistantReply(parsed.replyText),
       action: "reply",
       createdEvent: null,
       completedActions: [],
@@ -344,7 +361,7 @@ export async function runLifeOsAssistantTurn(params: {
   }
 
   return {
-    reply: parsed.replyText,
+    reply: humanizeAssistantReply(parsed.replyText),
     action: parsed.steps[0]?.type ?? "reply",
     createdEvent: createdEventSummary,
     completedActions,
@@ -388,7 +405,7 @@ async function planAssistantAction({
       model,
       reasoning: { effort: "low" },
       instructions:
-        `You are Briefly, a practical Danish assistant for everyday life. Your purpose is to reduce mental load by turning natural-language requests into calm, useful action. Interpret the user message and decide what concrete actions to take. You may create a Google Calendar event, delete a Google Calendar event, create a Google Task, add shopping items, create a meal plan entry, or combine several of those in the same response. Be date-aware and week-aware. Resolve relative dates against Europe/Copenhagen and the current ISO week context. Weekend means Saturday and Sunday. Use the recent conversation to keep context across follow-up replies like yes, okay, do it, that one, slet den, flyt den, or thank you. If the most recent assistant message asked a clarification question or named a concrete item, and the user now answers briefly, treat that as a follow-up instead of starting over. Listen carefully before acting: when the user gives multiple details in one request, preserve all of them. For calendar and task datetimes inside steps, always output full ISO datetime strings with seconds, for example 2026-06-08T18:00:00+02:00. For all-day calendar events, set isAllDay to true and use startsAt as the first included day and endsAt as the last included day in human terms, not Google Calendar's exclusive technical end date. In replyText, never use raw ISO strings, timezone abbreviations like CEST/CET, or an explicit year unless the user asked for it or the date is in another calendar year than the current relevant context. Prefer natural phrasing like i morgen kl. 10.00, tirsdag kl. 18.00, eller den 14. januar. If the user gives only a start time for a calendar event, leave endsAt null so the app can default it to 60 minutes. For calendar deletion, use type delete_calendar_event and include the event title. Include startsAt when it is known from the user message or recent conversation. For meal plans, plannedFor must be a calendar date in YYYY-MM-DD. Write replyText in Danish. Keep it calm, warm, useful, and specific.${isVoiceChannel ? " Voice mode: keep replyText short and speakable. Use at most two short sentences unless you are asking a clarification question. Put the action first, then any one essential detail." : ""} If the user is vague or missing key timing information, return no steps and use replyText to ask one short clarification question.`,
+        `You are Briefly, a practical Danish assistant for everyday life. Your purpose is to reduce mental load by turning natural-language requests into calm, useful action. Interpret the user message and decide what concrete actions to take. You may create a Google Calendar event, delete a Google Calendar event, create a Google Task, add shopping items, create a meal plan entry, or combine several of those in the same response. Be date-aware and week-aware. Resolve relative dates against Europe/Copenhagen and the current ISO week context. Weekend means Saturday and Sunday. Use the recent conversation to keep context across follow-up replies like yes, okay, do it, that one, slet den, flyt den, or thank you. If the most recent assistant message asked a clarification question or named a concrete item, and the user now answers briefly, treat that as a follow-up instead of starting over. Listen carefully before acting: when the user gives multiple details in one request, preserve all of them. For calendar and task datetimes inside steps, always output full ISO datetime strings with seconds, for example 2026-06-08T18:00:00+02:00. For all-day calendar events, set isAllDay to true and use startsAt as the first included day and endsAt as the last included day in human terms, not Google Calendar's exclusive technical end date. In replyText, never use raw ISO strings, timezone abbreviations like CEST/CET, or an explicit year unless the user asked for it or the date is in another calendar year than the current relevant context. Never wrap times or metadata in parentheses. Avoid stiff or technical phrasing. Do not say things like 'dagens vigtigste tid er' or 'klokken 20.10:'. Prefer natural Danish phrasing like i morgen kl. 10.00, tirsdag kl. 18.00, eller den 14. januar. If the user gives only a start time for a calendar event, leave endsAt null so the app can default it to 60 minutes. For calendar deletion, use type delete_calendar_event and include the event title. Include startsAt when it is known from the user message or recent conversation. For meal plans, plannedFor must be a calendar date in YYYY-MM-DD. Write replyText in Danish. Keep it calm, warm, useful, specific, and genuinely human.${isVoiceChannel ? " Voice mode: keep replyText short and speakable. Use at most two short sentences unless you are asking a clarification question. Put the action first, then any one essential detail." : ""} If the user is vague or missing key timing information, return no steps and use replyText to ask one short clarification question.`,
       input: prompt,
       text: {
         format: {
@@ -543,6 +560,240 @@ function formatConversationHistory(
     .slice(-12)
     .map((item, index) => `${index + 1}. ${item.role}: ${item.content}`)
     .join("\n");
+}
+
+async function answerRelativeDayBrief(params: {
+  message: string;
+  model: string;
+  calendarEvents: CachedCalendarEvent[];
+  tasks: CachedTask[];
+  familyWorkspace: {
+    mealPlans: FamilyMealPlanEntry[];
+    shoppingItems: ShoppingListEntry[];
+  };
+}) {
+  const target = resolveRelativeDayBriefTarget(params.message);
+
+  if (!target || !process.env.OPENAI_API_KEY) {
+    return null;
+  }
+
+  const targetDate = target === "tomorrow"
+    ? addDays(getCurrentDateContext().today, 1)
+    : getCurrentDateContext().today;
+  const targetDateKey = format(targetDate, "yyyy-MM-dd");
+  const targetLabel = target === "tomorrow" ? "i morgen" : "i dag";
+
+  const dayEvents = params.calendarEvents.filter(
+    (event) => getAppDateKey(event.startsAt) === targetDateKey,
+  );
+  const sortedDayEvents = [...dayEvents].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  const overlaps = findEventOverlaps(sortedDayEvents);
+  const targetMeal =
+    params.familyWorkspace.mealPlans.find((meal) => meal.plannedFor === targetDateKey) ?? null;
+  const relevantTasks = params.tasks
+    .filter((task) => {
+      if (!task.dueAt) {
+        return false;
+      }
+
+      return getAppDateKey(task.dueAt) === targetDateKey;
+    })
+    .slice(0, 4);
+  const openShoppingItems = params.familyWorkspace.shoppingItems
+    .filter((item) => !item.isCompleted)
+    .slice(0, 6);
+
+  const dayPrompt = [
+    `Skriv en kort, menneskelig briefing på dansk for ${targetLabel}.`,
+    `Kalenderaftaler ${targetLabel}: ${
+      sortedDayEvents.length > 0
+        ? sortedDayEvents
+            .map((event) =>
+              `${event.title}${event.isAllDay ? " hele dagen" : ` kl. ${formatAppTime(event.startsAt)}`}${
+                event.calendarName ? `, kalender ${event.calendarName}` : ""
+              }`,
+            )
+            .join(", ")
+        : "ingen kendte aftaler"
+    }.`,
+    `Overlap ${targetLabel}: ${
+      overlaps.length > 0
+        ? overlaps
+            .map(
+              (overlap) =>
+                `${overlap.firstTitle} kl. ${formatAppTime(overlap.firstStartsAt)} overlapper med ${overlap.secondTitle} kl. ${formatAppTime(overlap.secondStartsAt)}`,
+            )
+            .join(", ")
+        : "ingen overlap"
+    }.`,
+    `Opgaver med relevans ${targetLabel}: ${
+      relevantTasks.length > 0
+        ? relevantTasks
+            .map(
+              (task) =>
+                `${task.title}${task.taskListTitle ? `, liste ${task.taskListTitle}` : ""}${task.notes ? `, note ${task.notes}` : ""}`,
+            )
+            .join(", ")
+        : "ingen tydelige opgaver"
+    }.`,
+    `Middag ${targetLabel}: ${targetMeal ? `${targetMeal.title}${targetMeal.notes ? `, note ${targetMeal.notes}` : ""}` : "ingen planlagt middag"}.`,
+    `Åbne indkøb: ${
+      openShoppingItems.length > 0
+        ? openShoppingItems
+            .map((item) => `${item.label}${item.mealPlanId ? " knyttet til en ret" : ""}`)
+            .join(", ")
+        : "indkøbene er under kontrol"
+    }.`,
+    "Skriv 3 til 4 sætninger som en rolig, brugbar briefing. Nævn konkrete aftaler ved navn. Giv kontekst, ikke bare en opremsning. Fortæl hvad der er vigtigst at være opmærksom på, om noget overlapper, og om middag eller indkøb kræver handling. Undgå årstal, undgå tidszoner, undgå parenteser og undgå stive formuleringer. Det skal lyde som et menneske, ikke som et system.",
+  ].join(" ");
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: params.model,
+      reasoning: { effort: "low" },
+      instructions:
+        "Du er Briefly. Skriv en kort, varm og brugbar dansk briefing for den ønskede dag. Den skal føles som en lille menneskelig oversigt, ikke som en tør kalenderliste.",
+      input: dayPrompt,
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (!response.ok) {
+    return buildFallbackDayBrief({
+      targetLabel,
+      events: sortedDayEvents,
+      overlaps,
+      targetMeal,
+      openShoppingItems,
+    });
+  }
+
+  const payload = (await response.json()) as {
+    output_text?: string;
+    output?: Array<{
+      type?: string;
+      content?: Array<{
+        type?: string;
+        text?: string;
+      }>;
+    }>;
+  };
+
+  const text =
+    payload.output_text?.trim() ??
+    payload.output
+      ?.flatMap((item) => item.content ?? [])
+      .find((item) => item.type === "output_text" && typeof item.text === "string")
+      ?.text?.trim();
+
+  return text
+    ? humanizeAssistantReply(text)
+    : buildFallbackDayBrief({
+        targetLabel,
+        events: sortedDayEvents,
+        overlaps,
+        targetMeal,
+        openShoppingItems,
+      });
+}
+
+function resolveRelativeDayBriefTarget(message: string) {
+  const normalized = normalizeMatchText(message);
+
+  const asksForBrief =
+    normalized.includes("morgenbrief") ||
+    normalized.includes("brief") ||
+    normalized.includes("oversigt");
+
+  if (!asksForBrief) {
+    return null;
+  }
+
+  if (normalized.includes("i morgen") || normalized.includes("imorgen")) {
+    return "tomorrow" as const;
+  }
+
+  if (normalized.includes("i dag") || normalized.includes("idag")) {
+    return "today" as const;
+  }
+
+  return null;
+}
+
+function findEventOverlaps(events: CachedCalendarEvent[]) {
+  const overlaps: Array<{
+    firstTitle: string;
+    firstStartsAt: string;
+    secondTitle: string;
+    secondStartsAt: string;
+  }> = [];
+
+  for (let index = 0; index < events.length - 1; index += 1) {
+    const current = events[index];
+    const next = events[index + 1];
+
+    if (current.isAllDay || next.isAllDay) {
+      continue;
+    }
+
+    if (new Date(current.endsAt).getTime() > new Date(next.startsAt).getTime()) {
+      overlaps.push({
+        firstTitle: current.title,
+        firstStartsAt: current.startsAt,
+        secondTitle: next.title,
+        secondStartsAt: next.startsAt,
+      });
+    }
+  }
+
+  return overlaps;
+}
+
+function buildFallbackDayBrief(params: {
+  targetLabel: string;
+  events: CachedCalendarEvent[];
+  overlaps: Array<{
+    firstTitle: string;
+    firstStartsAt: string;
+    secondTitle: string;
+    secondStartsAt: string;
+  }>;
+  targetMeal: FamilyMealPlanEntry | null;
+  openShoppingItems: ShoppingListEntry[];
+}) {
+  if (params.events.length === 0) {
+    return `Der er ikke meget bundet op i kalenderen ${params.targetLabel}. ${
+      params.targetMeal
+        ? `Middagen er ${params.targetMeal.title}.`
+        : "Der er heller ingen middag lagt fast endnu."
+    }`;
+  }
+
+  const firstEvent = params.events[0];
+  const overlapLine = params.overlaps[0]
+    ? `Vær især opmærksom på, at ${params.overlaps[0].firstTitle} overlapper med ${params.overlaps[0].secondTitle}.`
+    : "";
+  const mealLine = params.targetMeal
+    ? `Middagen er ${params.targetMeal.title}.`
+    : "";
+  const shoppingLine = params.openShoppingItems.length > 0
+    ? `Indkøbslisten er stadig åben med blandt andet ${params.openShoppingItems.slice(0, 2).map((item) => item.label).join(" og ")}.`
+    : "";
+
+  return [
+    `${params.targetLabel === "i morgen" ? "I morgen" : "I dag"} starter med ${firstEvent.title}${firstEvent.isAllDay ? "" : ` kl. ${formatAppTime(firstEvent.startsAt)}`}.`,
+    overlapLine,
+    mealLine,
+    shoppingLine,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function answerCalendarLookupFromCache(
@@ -843,4 +1094,13 @@ function formatDeletionEventLabel(event: CachedCalendarEvent) {
   }
 
   return `${format(toAppTimeZoneDate(event.startsAt), "EEE d MMM")} · ${formatAppTime(event.startsAt)}`;
+}
+
+function humanizeAssistantReply(text: string) {
+  return text
+    .replace(/\s*\((?:CET|CEST|UTC|GMT[^)]*|kl\.?\s*\d{1,2}[.:]\d{2}|[A-Z]{2,5})\)/g, "")
+    .replace(/klokken\s+\d{1,2}[.:]\d{2}:\s*dagens vigtigste tid er\s*kl\.?\s*(\d{1,2}[.:]\d{2})/gi, "Dagens vigtigste tidspunkt er kl. $1")
+    .replace(/dagens vigtigste tid er\s*kl\.?\s*(\d{1,2}[.:]\d{2})/gi, "Dagens vigtigste tidspunkt er kl. $1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }

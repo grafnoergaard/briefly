@@ -7,9 +7,9 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { HomeBriefingAiInput, HomeBriefingAiSection, HomeBriefingModel } from "@/lib/types";
 import type { AiBriefSettings } from "@/lib/ai-settings";
 
-const AI_BRIEF_SOURCE_VERSION = "home_brief_v7";
+const AI_BRIEF_SOURCE_VERSION = "home_brief_v8";
 const AI_BRIEF_INSTRUCTIONS =
-  "Skriv en sammenhængende Life OS-briefing på dansk som ét samlet afsnit på 4 til 5 sætninger. Life OS er en rolig, intelligent hverdagsbriefing, ikke et produktivitetsdashboard. Gå direkte til det vigtigste; ingen hilsen og ingen overskrift som 'lige nu' eller 'i dag'. Briefingen skal være familiebevidst og tydeligt skelne mellem personlige opgaver, familie-logistik og madplan/indkøb, men uden at lyde mekanisk. Nævn de konkrete kalenderaftaler ved navn i konteksten; det er ikke nok at skrive hvor mange aftaler der er. Hvis to aftaler overlapper, skal det siges tydeligt. Brug den første del af briefingen på dagens tidskritiske kalender og eventuelle overlap. Brug derefter opgaver, men kun hvis der er reelt relevante åbne ting, især dem der forfalder i dag eller er forsinkede. Aftensmad skal beskrives som aktuel kontekst; undgå unødvendige datoer på dagens middag. Afslut med indkøb og sig tydeligt, hvis listen er under kontrol. Briefingen skal reducere mental belastning og skabe ro, nærvær og overskud. Vær dato- og ugebevidst: respekter den aktuelle ISO-uge, nævn weekend hvis det er relevant, og behandl aldrig gamle planer eller gammel familieaktivitet som aktuelle. Ignorér måltider, aftaler eller familieopdateringer der ligger i fortiden, medmindre de stadig har åbne konsekvenser i dag. Brug konkrete detaljer fra kalender, lister, madplan og indkøb når de findes. Behandl lister som en enkel to-do-liste, ikke som et dramatisk prioriteringssystem. Skriv roligt, præcist og praktisk. Undgå fyld, undgå at gentage kategorinavne, og undgå generiske opsummeringer som 'du har 2 kalenderpunkter i dag'. Brug ikke markdown, punktlister, overskrifter eller labels.";
+  "Skriv en sammenhængende Life OS-briefing på dansk som ét samlet afsnit på 4 til 5 sætninger. Life OS er en rolig, intelligent hverdagsbriefing, ikke et produktivitetsdashboard. Gå direkte til det vigtigste; ingen hilsen og ingen overskrift som 'lige nu' eller 'i dag'. Briefingen skal være familiebevidst og tydeligt skelne mellem personlige opgaver, familie-logistik og madplan/indkøb, men uden at lyde mekanisk. Nævn de konkrete kalenderaftaler ved navn i konteksten; det er ikke nok at skrive hvor mange aftaler der er. Hvis to aftaler overlapper, skal det siges tydeligt. Brug den første del af briefingen på dagens tidskritiske kalender og eventuelle overlap. Brug derefter opgaver, men kun hvis der er reelt relevante åbne ting, især dem der forfalder i dag eller er forsinkede. Aftensmad skal beskrives som aktuel kontekst; undgå unødvendige datoer på dagens middag. Afslut med indkøb og sig tydeligt, hvis listen er under kontrol. Briefingen skal reducere mental belastning og skabe ro, nærvær og overskud. Vær dato- og ugebevidst: respekter den aktuelle ISO-uge, nævn weekend hvis det er relevant, og behandl aldrig gamle planer eller gammel familieaktivitet som aktuelle. Ignorér måltider, aftaler eller familieopdateringer der ligger i fortiden, medmindre de stadig har åbne konsekvenser i dag. Brug konkrete detaljer fra kalender, lister, madplan og indkøb når de findes. Behandl lister som en enkel to-do-liste, ikke som et dramatisk prioriteringssystem. Skriv roligt, præcist og praktisk med ægte menneskeligt dansk. Undgå stive formuleringer som 'dagens vigtigste tid er' eller 'klokken 20.10:'. Undgå parenteser omkring tidspunkter eller metadata. Nævn kun klokkeslæt, når de hjælper læseren. Brug ikke markdown, punktlister, overskrifter eller labels.";
 
 type ResolveAiBriefSummaryInput = {
   userId: string;
@@ -88,13 +88,15 @@ export async function resolveAiBriefSummary({
     .maybeSingle();
 
   if (cachedBrief?.summary) {
+    const cleanedCachedSummary = humanizeDanishText(cachedBrief.summary);
+
     return {
-      summary: cachedBrief.summary,
+      summary: cleanedCachedSummary,
       mode: "generated",
       status: `AI-briefingen er opdateret til de seneste kendte data og blev cachet med ${cachedBrief.model ?? settings.model}.`,
       input: aiInput,
       promptText,
-      sections: buildSectionsFromSummary(cachedBrief.summary, aiInput),
+      sections: buildSectionsFromSummary(cleanedCachedSummary, aiInput),
     };
   }
 
@@ -103,13 +105,14 @@ export async function resolveAiBriefSummary({
       model: settings.model,
       promptText,
     });
+    const cleanedSummary = humanizeDanishText(generatedSummary);
 
     await supabase.from("ai_briefings").insert({
       profile_id: userId,
       family_group_id: familyGroupId,
       briefing_type: "morning",
       model: settings.model,
-      summary: generatedSummary,
+      summary: cleanedSummary,
       prompt_snapshot: {
         source: AI_BRIEF_SOURCE_VERSION,
         tone: settings.tone,
@@ -120,12 +123,12 @@ export async function resolveAiBriefSummary({
     });
 
     return {
-      summary: generatedSummary,
+      summary: cleanedSummary,
       mode: "generated",
       status: `AI-briefing genereret med ${settings.model} for de seneste kendte data.`,
       input: aiInput,
       promptText,
-      sections: buildSectionsFromSummary(generatedSummary, aiInput),
+      sections: buildSectionsFromSummary(cleanedSummary, aiInput),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Ukendt fejl i AI-briefing.";
@@ -189,7 +192,7 @@ async function generateAiBrief({
     throw new Error("OpenAI returnerede en tom briefing.");
   }
 
-  return text;
+  return humanizeDanishText(text);
 }
 
 function buildPromptText(input: HomeBriefingAiInput, tone: string) {
@@ -199,7 +202,7 @@ function buildPromptText(input: HomeBriefingAiInput, tone: string) {
           const timeLabel = event.isAllDay ? "hele dagen" : formatAppTime(event.startsAt);
           const location = event.location ? `, ${event.location}` : "";
           const calendar = event.calendarName ? `, kalender: ${event.calendarName}` : "";
-          return `${event.title} (${timeLabel}${location}${calendar})`;
+          return `${event.title}; tidspunkt ${timeLabel}${location}${calendar}`;
         })
         .join(", ")
     : "ingen";
@@ -287,6 +290,15 @@ function buildPromptText(input: HomeBriefingAiInput, tone: string) {
     "Brug de faktiske aftalenavne, faktiske tidspunkter, faktiske opgavetitler, den aktuelle middag og de faktiske manglende indkøbsvarer, når de findes.",
     "Start ikke med en hilsen. Det må ikke lyde som en assistent. Det skal lyde som en kort personlig briefing.",
   ].join(" ");
+}
+
+function humanizeDanishText(text: string) {
+  return text
+    .replace(/\s*\((?:CET|CEST|UTC|GMT[^)]*|kl\.?\s*\d{1,2}[.:]\d{2}|[A-Z]{2,5})\)/g, "")
+    .replace(/klokken\s+\d{1,2}[.:]\d{2}:\s*dagens vigtigste tid er\s*kl\.?\s*(\d{1,2}[.:]\d{2})/gi, "Dagens vigtigste tidspunkt er kl. $1")
+    .replace(/dagens vigtigste tid er\s*kl\.?\s*(\d{1,2}[.:]\d{2})/gi, "Dagens vigtigste tidspunkt er kl. $1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function buildSectionsFromSummary(summary: string, input: HomeBriefingAiInput): HomeBriefingAiSection[] {

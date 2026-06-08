@@ -544,7 +544,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
         </div>
       ) : null}
 
-      <div className={variant === "page" ? "grid gap-4 xl:grid-cols-[1.15fr_0.85fr]" : "grid gap-4"}>
+      <div className={variant === "page" ? "grid gap-4 xl:grid-cols-[1.15fr_0.85fr]" : "grid gap-3"}>
         <div
           className={
             variant === "page"
@@ -589,11 +589,11 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
           </div>
 
           <form
-            className={
-              variant === "embedded"
-                ? "rounded-[28px] border border-white/10 bg-white/5 p-3"
-                : "mt-5 rounded-[28px] border border-black/5 bg-[#f7f7f3] p-3"
-            }
+              className={
+                variant === "embedded"
+                  ? "rounded-[24px] border border-white/10 bg-white/5 p-2.5 sm:rounded-[28px] sm:p-3"
+                  : "mt-5 rounded-[28px] border border-black/5 bg-[#f7f7f3] p-3"
+              }
             onSubmit={(event) => {
               event.preventDefault();
 
@@ -611,7 +611,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
               <span className="sr-only">Message Briefly</span>
               <div className="relative">
                 <div
-                  className={`pointer-events-none absolute inset-x-3 top-3 z-10 rounded-[20px] border px-4 py-3 backdrop-blur-sm ${
+                  className={`pointer-events-none absolute inset-x-3 top-3 z-10 rounded-[18px] border px-3 py-3 backdrop-blur-sm sm:rounded-[20px] sm:px-4 ${
                     variant === "embedded"
                       ? "border-white/10 bg-white/6"
                       : "border-[#3C5C4E]/10 bg-[#f4f6f2]"
@@ -647,7 +647,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span
                           className={`text-[11px] uppercase tracking-[0.22em] ${
                             variant === "embedded" ? "text-white/55" : "text-[#3C5C4E]/80"
@@ -668,7 +668,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
                         </span>
                       </div>
                       <p
-                        className={`mt-1 text-sm leading-6 ${
+                        className={`mt-1 text-[13px] leading-5 sm:text-sm sm:leading-6 ${
                           variant === "embedded" ? "text-white/70" : "text-foreground/70"
                         }`}
                       >
@@ -712,7 +712,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
                   rows={4}
                   className={
                     variant === "embedded"
-                      ? "min-h-40 w-full resize-none rounded-[22px] border border-transparent bg-white/95 px-4 pb-4 pt-24 text-sm leading-7 text-foreground outline-none transition focus:border-white/20 focus:ring-2 focus:ring-white/10"
+                      ? "min-h-36 w-full resize-none rounded-[20px] border border-transparent bg-white/95 px-4 pb-4 pt-[5.45rem] text-sm leading-7 text-foreground outline-none transition focus:border-white/20 focus:ring-2 focus:ring-white/10 sm:min-h-40 sm:rounded-[22px] sm:pt-24"
                       : "min-h-40 w-full resize-none rounded-[22px] border border-transparent bg-white px-4 pb-4 pt-24 text-sm leading-7 text-foreground outline-none transition focus:border-[#3C5C4E] focus:ring-2 focus:ring-[#3C5C4E]/10"
                   }
                 />
@@ -737,7 +737,7 @@ export function AssistantChat({ variant = "page" }: AssistantChatProps) {
                   </p>
                 )}
               </div>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-row sm:items-center">
                 <Button
                   type="button"
                   variant={isRealtimeActive ? "default" : "outline"}
