@@ -25,10 +25,7 @@ export default async function ShoppingPage({ searchParams }: ShoppingPageProps) 
     shoppingListId: params.list,
   });
   const sortMode = params.sort === "category" ? "category" : "manual";
-  const viewMode =
-    params.view === "add" || params.view === "lists" || params.view === "shop"
-      ? params.view
-      : "shop";
+  const viewMode = params.view === "add" || params.view === "shop" ? params.view : "shop";
   const activeList = family.shoppingLists.find((list) => list.id === family.activeShoppingListId) ?? null;
   const baseQuery = `list=${family.activeShoppingListId ?? ""}&sort=${sortMode}`;
 
@@ -67,7 +64,6 @@ export default async function ShoppingPage({ searchParams }: ShoppingPageProps) 
               <div className="flex flex-wrap gap-2">
                 {[
                   { key: "add", label: "Tilføj ny vare" },
-                  { key: "lists", label: "Indkøbslister" },
                   { key: "shop", label: "Handlevisning" },
                 ].map((tab) => (
                   <a
@@ -97,7 +93,7 @@ export default async function ShoppingPage({ searchParams }: ShoppingPageProps) 
                     Læg nye varer ind
                   </h2>
                   <p className="mt-2 text-sm leading-7 text-muted-foreground">
-                    Her lægger du nye varer ind på den aktive indkøbsliste.
+                    Her lægger du nye varer ind på den aktive indkøbsliste og styrer dine forskellige lister.
                   </p>
                 </div>
 
@@ -107,20 +103,14 @@ export default async function ShoppingPage({ searchParams }: ShoppingPageProps) 
                   shoppingListLabel={family.activeShoppingListName}
                   redirectTo={`/shopping?view=add&${baseQuery}`}
                 />
-              </div>
-            </section>
-          ) : null}
 
-          {viewMode === "lists" ? (
-            <section className="rounded-[30px] border border-black/6 bg-white p-5 shadow-[0_24px_60px_-42px_rgba(17,24,39,0.35)] sm:p-6">
-              <div className="space-y-4">
                 <div>
                   <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
                     Indkøbslister
                   </p>
-                  <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-foreground">
+                  <h3 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-foreground">
                     Skift eller opret en liste
-                  </h2>
+                  </h3>
                   <p className="mt-2 text-sm leading-7 text-muted-foreground">
                     Hold hverdagsindkøb og særlige arrangementer adskilt.
                   </p>
